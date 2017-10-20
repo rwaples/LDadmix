@@ -54,16 +54,7 @@ parser.add_argument('-T', type=float, default=1e-3, help='EM stopping tolerance'
 parser.add_argument('-F', type=str, default='LONG', help='Output format')
 parser.add_argument('-R', type=int, default=3, help='Output precision')
 
-import __main__ as main
-if hasattr(main, '__file__'): # if not interactive
-    args = parser.parse_args()
-else: # if interactive (e.g. in notebook)
-    #prevents trying to parse the sys.argv[1] of the interactive session
-    args = parser.parse_args(['-Q' './explore/prototype/example_1.admixed.Q',
-                             '-G', './explore/prototype/example_1.ld.forLDadmix',
-                             '-P', '10', '-L', '500', '-I', '200'])
-
-
+args = parser.parse_args()
 
 
 
@@ -164,7 +155,7 @@ Qs = itertools.repeat(q, )
 if max_dist:
 	codes = itertools.imap(LDadmix.get_geno_codes, [(geno_array[x], geno_array[y]) for (x,y) in distance_pairs])
 else:
-	codes = itertools.imap(LDadmix.get_geno_codes, itertools.combinations(geno_array, 2))
+	codes = itertools.imap(LDadmix.get_geno_codes, itertools.combinations(geno_array, 2)) # use all pairs
 iter_iter = itertools.repeat(args.I)
 tol_iter = itertools.repeat(args.T)
 inputs = itertools.izip(Hs, Qs, codes, iter_iter, tol_iter)
@@ -203,17 +194,16 @@ if args.F == 'LONG': # write the long-style output (one line per pop/locus pair)
 			r2, D, Dprime, pA, pB = LDadmix.get_sumstats_from_haplotype_freqs(res[0])
 			for pop in xrange(npops):
 
-				# get the distances here, quick hack
+				# get the locus names here, quick hack
 				locusname_1 = locus_list[pair[0]].name
 				locusname_2 = locus_list[pair[1]].name
-
 				OUTFILE.write('{}\t{}\t'.format(locusname_1, locusname_2))
 
 				# get the distances here, quick hack
 				pair_distance_genetic = np.abs(locus_list[pair[0]].position - locus_list[pair[1]].position)
 				pair_distance_bp =  np.abs(locus_list[pair[0]].bp_position - locus_list[pair[1]].bp_position)
-
 				OUTFILE.write('{}\t{}\t'.format(pair_distance_genetic, pair_distance_bp))
+
 				OUTFILE.write('{}\t'.format(pop))
 				OUTFILE.write('{:.{precision}}\t'.format(r2[pop], precision = args.R))
 				OUTFILE.write('{:.{precision}}\t'.format(D[pop], precision = args.R))
