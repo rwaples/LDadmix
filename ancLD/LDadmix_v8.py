@@ -13,7 +13,7 @@ import itertools
 
 # external
 import numpy as np
-#import pandas as pd
+import scipy.spatial.distance
 from plinkio import plinkfile
 
 #internal
@@ -38,19 +38,21 @@ import LDadmix_v8_funcs as LDadmix
 
 
 parser = argparse.ArgumentParser()
+# dealing with the input data
 parser.add_argument('-Q', type=str, default = None, help='path to Q file')
 parser.add_argument('-G', type=str, default = './data/example_1', help='path to plink bed file')
 parser.add_argument('-O', type=str, default = '../scratch/example_1.out',  help='path to output file')
+parser.add_argument('-L', type=int, default=100000, help='maximum number of locus pairs to analyze, set to zero for no limit')
+parser.add_argument('-D', type=float, default=float(0), help='analyze only pairs of sites within this distance, set to zero for no limit')
+parser.add_argument('-C', type=bool, default=False, help='use genetic postion, default is to use bp position')
+# Threading
 parser.add_argument('-P', type=int, default=4, help='number of threads')
-parser.add_argument('-L', type=int, default=20, help='analyze the first L loci')
+# EM options
 parser.add_argument('-I', type=int, default=100, help='Max number of EM iterations')
 parser.add_argument('-T', type=float, default=1e-3, help='EM stopping tolerance')
+# output options
 parser.add_argument('-F', type=str, default='LONG', help='Output format')
 parser.add_argument('-R', type=int, default=3, help='Output precision')
-
-
-# In[ ]:
-
 
 import __main__ as main
 if hasattr(main, '__file__'): # if not interactive
@@ -62,16 +64,22 @@ else: # if interactive (e.g. in notebook)
                              '-P', '10', '-L', '500', '-I', '200'])
 
 
-# In[8]:
+
 
 
 print("\n------------------\nParameters: ")
 print("Q file: {}".format(args.Q))
 print("Plink files: {}".format(args.G))
 print("Output file: {}".format(args.O))
+print("Max number of locus pairs: {}  (0 = no limit)".format(args.L))
+print("Max distance of locus pairs to analyze: {}".format(args.D))
+if args.C:
+	print("Distance unit: genetic")
+else:
+	print("Distance unit: bp")
+
 print("Number of threads: {}".format(args.P))
-print("Max number of loci: {}".format(args.L))
-print("Max number of iterations: {}".format(args.I))
+print("Max number of EM iterations: {}".format(args.I))
 print("------------------\n")
 
 
@@ -106,28 +114,57 @@ print("Shape of Q data:\n\t{}\tindividuals\n\t{}\tpopulations".format(q.shape[0]
 
 # quick sanity checks
 assert(q.shape[0] == geno_array.shape[1]), "The number of individuals in the Q file doesn't match the G file!"
-assert(geno_array.shape[0] >= args.L), "You asked for more loci ({}) than are present in the G file ({})!".format(args.L, geno_array.shape[0])
 
 print("Done loading data, starting LDadmix.")
 print("------------------\n")
 
 
 # ## Analyze
-start_time = time.time()
 
-nloci = args.L
-npairs = (nloci*(nloci-1))/2
+# bookkeeping
+data_nloci = geno_array.shape[0]
+data_nsamples = geno_array.shape[1]
+max_pairs = int(args.L)
+max_dist  = float(args.D)
+
+distance_pairs = None
+if max_dist:
+	if args.C:
+		# use position
+		positions = np.array([xx.position for xx in locus_list])[:,None]
+	else:
+		# use bp position
+		positions = np.array([xx.bp_position for xx in locus_list])[:,None]
+    # make distance matrix
+	distm = scipy.spatial.distance.squareform(scipy.spatial.distance.pdist(positions))
+    # pairs that meet the criteria, remove double comparisons
+	distance_pairs = [x for x in zip(*np.where(distm<=max_dist)) if x[0]<x[1]]
+	#print('found {} pairs within {} units'.format(len(distance_pairs), max_dist))
+
+# determine how many pairs will be analyzed
+if max_dist:
+	if max_pairs:
+		npairs = min(len(distance_pairs), max_pairs)
+	else:
+		npairs = len(distance_pairs)
+elif max_pairs:
+	npairs = min((data_nloci*(data_nloci-1)/2), max_pairs) # minimum of limit
+else:
+	npairs = (data_nloci*(data_nloci-1)/2)
+
 npops = q.shape[1]
+
 print("\n------------------")
-print("There are {} locus pairs to analyze.".format(npairs))
+print("Analysis will proceed for {}/{} possible locus pairs.".format(npairs, (data_nloci*(data_nloci-1)/2)))
 
-
-
-
+start_time = time.time()
 # make input iterators
-Hs = itertools.imap(LDadmix.get_rand_hap_freqs, itertools.repeat(npops, npairs))
-Qs = itertools.repeat(q)
-codes = itertools.imap(LDadmix.get_geno_codes, itertools.combinations(geno_array[:nloci], 2))
+Hs = itertools.imap(LDadmix.get_rand_hap_freqs, itertools.repeat(npops, npairs)) # the repeat length will stop after npairs iterations
+Qs = itertools.repeat(q, )
+if max_dist:
+	codes = itertools.imap(LDadmix.get_geno_codes, [(geno_array[x], geno_array[y]) for (x,y) in distance_pairs])
+else:
+	codes = itertools.imap(LDadmix.get_geno_codes, itertools.combinations(geno_array, 2))
 iter_iter = itertools.repeat(args.I)
 tol_iter = itertools.repeat(args.T)
 inputs = itertools.izip(Hs, Qs, codes, iter_iter, tol_iter)
@@ -146,83 +183,49 @@ print('*** Running time ***')
 print("*** {:.2f} seconds ***".format(time.time() - start_time))
 print("------------------\n ")
 
-
-# In[14]:
-
-
 print("\n------------------ ")
 print("Writing results file: {}".format(args.O))
 
-
-# In[15]:
-
-if args.F == 'WIDE': # write the wide-style output (one line per locus pair)
-	# out of date
-    with open(args.O, 'w') as OUTFILE:
-        # write header
-        LDheader = ['r2_Pop{}'.format(x) for x in xrange(1, 1+ npops)] + ['D_Pop{}'.format(x) for x in xrange(1, 1+ npops)] + ['Dprime_Pop{}'.format(x) for x in xrange(1, 1+ npops)]
-        freqheader = ['p1_Pop{}'.format(x) for x in xrange(1, 1+ npops)] + ['p2_Pop{}'.format(x) for x in xrange(1, 1+ npops)]
-        hapheader = ['Hap{}_Pop{}'.format(hap, pop) for hap,pop in zip(
-            [1,2,3,4]*npops, [x for x in xrange(1, npops+1) for i in xrange(4)])]
-        header = ['Locus1', 'Locus2'] + LDheader + freqheader + hapheader +['LL', 'nIter']
-        OUTFILE.write('\t'.join(header))
-        OUTFILE.write('\n')
-
-        # for each locus pair
-        for pair, res in zip(itertools.combinations(xrange(nloci), 2), pool_outputs):
-            OUTFILE.write('{}\t{}'.format(pair[0], pair[1]))
-            r2, D, Dprime, pA, pB = LDadmix.get_sumstats_from_haplotype_freqs(res[0])
-            for xx in r2:
-                OUTFILE.write('\t{}'.format(xx))
-            for xx in D:
-                OUTFILE.write('\t{}'.format(xx))
-            for xx in Dprime:
-                OUTFILE.write('\t{}'.format(xx))
-            for xx in pA:
-                OUTFILE.write('\t{}'.format(xx))
-            for xx in pB:
-                OUTFILE.write('\t{}'.format(xx))
-            # haps
-            for xx in res[0].flatten():
-                OUTFILE.write('\t{}'.format(xx))
-            OUTFILE.write('\t{}'.format(res[1]))
-            OUTFILE.write('\t{}'.format(res[2]))
-            OUTFILE.write('\n')
-
-
-# ### New long format for output
-
-# In[16]:
-
-
 if args.F == 'LONG': # write the long-style output (one line per pop/locus pair)
     with open(args.O, 'w') as OUTFILE:
-        # write header
-        header = ['Locus1', 'Locus2', 'Pop', 'r2', 'D', 'Dprime', 'freq1', 'freq2',
-                  'Hap00', 'Hap01', 'Hap10', 'Hap11', 'loglike', 'nIter']
-        OUTFILE.write('\t'.join(header))
-        OUTFILE.write('\n')
-        # for each locus pair
-        pairs = itertools.combinations(xrange(nloci), 2)
-        for res in pool_outputs:
-            pair = next(pairs)
-            r2, D, Dprime, pA, pB = LDadmix.get_sumstats_from_haplotype_freqs(res[0])
-            for pop in xrange(npops):
-                OUTFILE.write('{}\t{}\t'.format(pair[0], pair[1]))
-                OUTFILE.write('{}\t'.format(pop))
-                OUTFILE.write('{:.{precision}}\t'.format(r2[pop], precision = args.R))
-                OUTFILE.write('{:.{precision}}\t'.format(D[pop], precision = args.R))
-                OUTFILE.write('{:.{precision}}\t'.format(Dprime[pop], precision = args.R))
-                OUTFILE.write('{:.{precision}f}\t'.format(pA[pop], precision = args.R))
-                OUTFILE.write('{:.{precision}f}\t'.format(pB[pop], precision = args.R))
-                for xx in res[0][pop]:
-                    OUTFILE.write('{:.{precision}}\t'.format(xx, precision = args.R))
-                OUTFILE.write('{:.{precision}}\t'.format(res[1], precision = 10))
-                OUTFILE.write('{}'.format(res[2]))
-                OUTFILE.write('\n')
+		# write header
+		header = ['Locus1', 'Locus2', 'genetic_dist', 'bp_dist', 'Pop', 'r2', 'D', 'Dprime', 'freq1', 'freq2',
+			'Hap00', 'Hap01', 'Hap10', 'Hap11', 'loglike', 'nIter']
+		OUTFILE.write('\t'.join(header))
+		OUTFILE.write('\n')
+		# for each locus pair
+		if max_dist:
+			pairs = itertools.chain(distance_pairs)
+		else:
+			pairs = itertools.combinations(xrange(data_nloci), 2)
+		for res in pool_outputs:
+			pair = next(pairs)
+			r2, D, Dprime, pA, pB = LDadmix.get_sumstats_from_haplotype_freqs(res[0])
+			for pop in xrange(npops):
 
+				# get the distances here, quick hack
+				locusname_1 = locus_list[pair[0]].name
+				locusname_2 = locus_list[pair[1]].name
 
-# In[17]:
+				OUTFILE.write('{}\t{}\t'.format(locusname_1, locusname_2))
+
+				# get the distances here, quick hack
+				pair_distance_genetic = np.abs(locus_list[pair[0]].position - locus_list[pair[1]].position)
+				pair_distance_bp =  np.abs(locus_list[pair[0]].bp_position - locus_list[pair[1]].bp_position)
+
+				OUTFILE.write('{}\t{}\t'.format(pair_distance_genetic, pair_distance_bp))
+				OUTFILE.write('{}\t'.format(pop))
+				OUTFILE.write('{:.{precision}}\t'.format(r2[pop], precision = args.R))
+				OUTFILE.write('{:.{precision}}\t'.format(D[pop], precision = args.R))
+				OUTFILE.write('{:.{precision}}\t'.format(Dprime[pop], precision = args.R))
+				OUTFILE.write('{:.{precision}f}\t'.format(pA[pop], precision = args.R))
+				OUTFILE.write('{:.{precision}f}\t'.format(pB[pop], precision = args.R))
+				for xx in res[0][pop]:
+				    OUTFILE.write('{:.{precision}}\t'.format(xx, precision = args.R))
+				OUTFILE.write('{:.{precision}}\t'.format(res[1], precision = 10))
+				OUTFILE.write('{}'.format(res[2]))
+				OUTFILE.write('\n')
+
 
 
 print( "Done writing results file, exiting")
