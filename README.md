@@ -1,2 +1,4 @@
-# LADadmix_demo
-first pass at a workable version LDadmix 
+# ancLD
+Estimates the ancestral haplotype frequencies and LD in the ancestral populations of admixed samples.
+
+
