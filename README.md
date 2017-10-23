@@ -13,7 +13,7 @@ python LDadmix_v8.py
 python 2.7+
 ### python packages
  - numpy
- - pandas
+ - scipy
  - plinkio
 ### optional python packages
- - numba (if present, will speed up the python code)
+ - numba (will speed up the calculations)

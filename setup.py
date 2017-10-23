@@ -8,7 +8,7 @@ setup(
     license='MIT',
     description='Estimate the haplotype frequencies and LD in the ancestral populations of admixed samples.',
     long_description=open('README.md').read(),
-    install_requires=[ 'numpy', 'pandas', 'plinkio'],
+    install_requires=[ 'numpy', 'scipy', 'plinkio'],
 	extras_require={'numba_jit_compilation': ['numba']},
     url='https://github.com/rwaples/ancLD',
     author='Ryan Waples',
