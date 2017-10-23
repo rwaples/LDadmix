@@ -2,10 +2,11 @@ from setuptools import setup, find_packages
 
 setup(
     name='ancLD',
-    version='0.8a',
+    version='0.8.1',
+	python_requires='>=2.7',
     packages=find_packages(exclude=['tests*']),
     license='MIT',
-    description='Estimates haplotype frequencies in the ancestral populations from genotypes in admixed samples',
+    description='Estimate the haplotype frequencies and LD in the ancestral populations of admixed samples.',
     long_description=open('README.md').read(),
     install_requires=[ 'numpy', 'pandas', 'plinkio'],
 	extras_require={'numba_jit_compilation': ['numba']},
