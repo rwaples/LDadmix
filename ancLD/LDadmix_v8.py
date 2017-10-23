@@ -22,13 +22,12 @@ import LDadmix_v8_funcs as LDadmix
 
 # ## TODO
 #     # deal with missing data - missing genotypes appear as '3' in the genotype matrix
-#     # put a max distance
-#     # deal with haplotype fixed in one population.
+#     # deal with a haplotype that is fixed in one population.
 #     # deal with random seed - difficult due to threading issues
 #     # speed up loglike calculation?
+#     # incorporate simulated data
 #     # common output format for simulated data and analyzed data
 #     # Python 3?
-#     # incorporate simulated data
 #     # firm up an example data set
 #     # compare to external libraries that work on vcf
 
