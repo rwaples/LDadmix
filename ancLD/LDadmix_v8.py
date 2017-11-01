@@ -13,19 +13,19 @@ from plinkio import plinkfile
 #internal
 import LDadmix_v8_funcs as LDadmix
 
-
 # ## TODO
-#     # deal with missing data - missing genotypes appear as '3' in the genotype matrix
-#     # deal with a haplotype that is fixed in one population.
-#     # do we need a test for fixed sites?
-#     # deal with random seed - difficult due to threading issues
-#     # speed up loglike calculation?
-#     # incorporate simulated data
-#     # common output format for simulated data and analyzed data
-#     # Python 3?
-#     # firm up an example data set
-#     # compare the LD calculations external libraries that work on vcf
-#     # add acknowledgements and a link to the greenland paper
+#	 # deal with missing data - missing genotypes appear as '3' in the genotype matrix
+#	 # deal with a haplotype that is fixed in one population.
+#	 # do we need a test for fixed sites?
+#	 # add check for valid chromosome names
+#	 # deal with random seed - difficult due to threading issues
+#	 # speed up loglike calculation?
+#	 # incorporate simulated data
+#	 # common output format for simulated data and analyzed data
+#	 # Python 3?
+#	 # firm up an example data set
+#	 # compare the LD calculations external libraries that work on vcf
+#	 # add acknowledgements and a link to the greenland paper
 
 
 # argparse
@@ -67,16 +67,16 @@ print("------------------\n")
 
 
 def load_plinkfile(basepath):
-    plink_file = plinkfile.open(basepath)
-    sample_list = plink_file.get_samples()
-    locus_list = plink_file.get_loci()
-    my_array = np.zeros((len(plink_file.get_loci( )), len(plink_file.get_samples( ))))
-    for i, el in enumerate(plink_file):
-        my_array[i] = el
+	plink_file = plinkfile.open(basepath)
+	sample_list = plink_file.get_samples()
+	locus_list = plink_file.get_loci()
+	my_array = np.zeros((len(plink_file.get_loci( )), len(plink_file.get_samples( ))))
+	for i, el in enumerate(plink_file):
+		my_array[i] = el
 	#if 3 in np.unique(my_array):
 	#	has_missing = True
 		# not sure what to do with missing data yet
-    return(sample_list, locus_list, my_array.astype(np.int))
+	return(sample_list, locus_list, my_array.astype(np.int))
 
 
 print("\n------------------\nLoading data:")
@@ -85,12 +85,12 @@ sample_list, locus_list, geno_array = load_plinkfile(args.G)
 print("Shape of genotype data:\n\t{}\tloci\n\t{}\tindividuals".format(geno_array.shape[0], geno_array.shape[1]))
 
 if args.Q is None:
-    print("No Q matrix was specified, assuming a single population.")
-    # Make a Q matrix with just one pop
-    q = np.ones((geno_array.shape[1], 1))
+	print("No Q matrix was specified, assuming a single population.")
+	# Make a Q matrix with just one pop
+	q = np.ones((geno_array.shape[1], 1))
 else:
-    q = pd.read_csv(args.Q, header = None, sep = ' ')
-    q = q.values
+	q = pd.read_csv(args.Q, header = None, sep = ' ')
+	q = q.values
 print("Shape of Q data:\n\t{}\tindividuals\n\t{}\tpopulations".format(q.shape[0], q.shape[1]))
 
 
@@ -117,9 +117,9 @@ if max_dist:
 	else:
 		# use bp position
 		positions = np.array([xx.bp_position for xx in locus_list])[:,None]
-    # make distance matrix
+	# make distance matrix
 	distm = scipy.spatial.distance.squareform(scipy.spatial.distance.pdist(positions))
-    # pairs that meet the criteria, remove double comparisons
+	# pairs that meet the criteria, remove double comparisons
 	distance_pairs = [x for x in zip(*np.where(distm<=max_dist)) if x[0]<x[1]]
 	#print('found {} pairs within {} units'.format(len(distance_pairs), max_dist))
 
@@ -169,7 +169,7 @@ print("\n------------------ ")
 print("Writing results file: {}".format(args.O))
 
 if args.F == 'LONG': # write the long-style output (one line per pop/locus pair)
-    with open(args.O, 'w') as OUTFILE:
+	with open(args.O, 'w') as OUTFILE:
 		# write header
 		header = ['Locus1', 'Locus2', 'genetic_dist', 'bp_dist', 'Pop', 'r2', 'D', 'Dprime', 'freq1', 'freq2',
 			'Hap00', 'Hap01', 'Hap10', 'Hap11', 'loglike', 'nIter']
@@ -202,7 +202,7 @@ if args.F == 'LONG': # write the long-style output (one line per pop/locus pair)
 				OUTFILE.write('{:.{precision}f}\t'.format(pA[pop], precision = args.R))
 				OUTFILE.write('{:.{precision}f}\t'.format(pB[pop], precision = args.R))
 				for xx in res[0][pop]:
-				    OUTFILE.write('{:.{precision}}\t'.format(xx, precision = args.R))
+					OUTFILE.write('{:.{precision}}\t'.format(xx, precision = args.R))
 				OUTFILE.write('{:.{precision}}\t'.format(res[1], precision = 10))
 				OUTFILE.write('{}'.format(res[2]))
 				OUTFILE.write('\n')

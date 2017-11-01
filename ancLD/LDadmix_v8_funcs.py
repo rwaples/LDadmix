@@ -11,7 +11,7 @@ try:
 except ImportError:
 	print("Import of numba failed, code will run slower")
 
-# decorator depending on numba, if numba decorate with import ability
+# decorator depending on numba, if numba is found, will decorate with: jit(nopython=True)
 def optional_numba_decorator(func):
 	if NUMBA:
 		return(jit(nopython=True)(func))
