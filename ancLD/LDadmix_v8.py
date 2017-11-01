@@ -1,9 +1,3 @@
-
-# coding: utf-8
-
-# In[1]:
-
-
 #base
 import argparse
 import sys
@@ -23,21 +17,20 @@ import LDadmix_v8_funcs as LDadmix
 # ## TODO
 #     # deal with missing data - missing genotypes appear as '3' in the genotype matrix
 #     # deal with a haplotype that is fixed in one population.
+#     # do we need a test for fixed sites?
 #     # deal with random seed - difficult due to threading issues
 #     # speed up loglike calculation?
 #     # incorporate simulated data
 #     # common output format for simulated data and analyzed data
 #     # Python 3?
 #     # firm up an example data set
-#     # compare to external libraries that work on vcf
-
-# # Interface
-
-# In[7]:
+#     # compare the LD calculations external libraries that work on vcf
+#     # add acknowledgements and a link to the greenland paper
 
 
+# argparse
 parser = argparse.ArgumentParser()
-# dealing with the input data
+# Input
 parser.add_argument('-Q', type=str, default = None, help='path to Q file')
 parser.add_argument('-G', type=str, default = './data/example_1', help='path to plink bed file')
 parser.add_argument('-O', type=str, default = '../scratch/example_1.out',  help='path to output file')
@@ -46,10 +39,10 @@ parser.add_argument('-D', type=float, default=float(0), help='analyze only pairs
 parser.add_argument('-C', type=bool, default=False, help='use genetic postion, default is to use bp position')
 # Threading
 parser.add_argument('-P', type=int, default=4, help='number of threads')
-# EM options
+# EM
 parser.add_argument('-I', type=int, default=100, help='Max number of EM iterations')
 parser.add_argument('-T', type=float, default=1e-3, help='EM stopping tolerance')
-# output options
+# Output
 parser.add_argument('-F', type=str, default='LONG', help='Output format')
 parser.add_argument('-R', type=int, default=3, help='Output precision')
 
@@ -73,7 +66,6 @@ print("Max number of EM iterations: {}".format(args.I))
 print("------------------\n")
 
 
-
 def load_plinkfile(basepath):
     plink_file = plinkfile.open(basepath)
     sample_list = plink_file.get_samples()
@@ -81,8 +73,8 @@ def load_plinkfile(basepath):
     my_array = np.zeros((len(plink_file.get_loci( )), len(plink_file.get_samples( ))))
     for i, el in enumerate(plink_file):
         my_array[i] = el
-	if 3 in np.unique(my_array):
-		has_missing = True
+	#if 3 in np.unique(my_array):
+	#	has_missing = True
 		# not sure what to do with missing data yet
     return(sample_list, locus_list, my_array.astype(np.int))
 

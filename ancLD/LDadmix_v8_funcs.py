@@ -12,7 +12,6 @@ except ImportError:
 	print("Import of numba failed, code will run slower")
 
 # decorator depending on numba, if numba decorate with import ability
-NUMBA = False
 def optional_numba_decorator(func):
 	if NUMBA:
 		return(jit(nopython=True)(func))
@@ -104,7 +103,7 @@ def do_multiEM(inputs):
 
         new_LL = get_LL_numba(Q = Q, H = H , code = code)
         delta_LL = new_LL - old_LL
-        assert(delta_LL > 0)
+        assert(delta_LL >= 0)
 
         if delta_LL < tol:
             break
