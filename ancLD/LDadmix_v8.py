@@ -18,6 +18,7 @@ import LDadmix_v8_funcs as LDadmix
 #	 # deal with a haplotype that is fixed in one population.
 #	 # do we need a test for fixed sites?
 #	 # add check for valid chromosome names
+#	 # check for data across multiple chromosomes - should we enfore only a single chromosome in the bim file?
 #	 # deal with random seed - difficult due to threading issues
 #	 # speed up loglike calculation?
 #	 # incorporate simulated data
