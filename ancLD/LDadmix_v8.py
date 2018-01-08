@@ -4,6 +4,7 @@ import sys
 import time
 import multiprocessing
 import itertools
+import pandas as pd
 
 # external
 import numpy as np
@@ -17,6 +18,7 @@ import LDadmix_v8_funcs as LDadmix
 #	 # deal with missing data - missing genotypes appear as '3' in the genotype matrix
 #	 # deal with a haplotype that is fixed in one population.
 #	 # do we need a test for fixed sites?
+#	 # better deal with situations with lots of data - can we avoid holding all the results in memory prior to writing them out
 #	 # add check for valid chromosome names
 #	 # check for data across multiple chromosomes - should we enfore only a single chromosome in the bim file?
 #	 # deal with random seed - difficult due to threading issues
