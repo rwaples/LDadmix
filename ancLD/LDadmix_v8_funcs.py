@@ -1,6 +1,5 @@
 import multiprocessing
 import itertools
-
 import numpy as np
 
 NUMBA = False
@@ -20,41 +19,46 @@ def optional_numba_decorator(func):
 
 
 @optional_numba_decorator
-def get_rand_hap_freqs(n=2):
-    """returns an (n,4) dimensioned numpy array of random haplotype frequencies,
-    where n is the number of pops"""
-    res = np.zeros((n, 4))
-    for i in xrange(n):
-        res[i] = np.diff(np.concatenate((np.array([0]), np.sort(np.random.rand(3)), np.array([1.0]))))
-    return(res)
+def get_rand_hap_freqs(n=2, SEED = None):
+	"""returns an (n,4) dimensioned numpy array of random haplotype frequencies,
+	where n is the number of pops"""
+	if SEED:
+		np.random.seed(SEED)
+
+	else:
+		pass
+	res = np.zeros((n, 4))
+	for i in xrange(n):
+		res[i] = np.diff(np.concatenate((np.array([0]), np.sort(np.random.rand(3)), np.array([1.0]))))
+	return(res)
 
 
 @optional_numba_decorator
 def get_geno_codes(genos):
-    """turns each pair of genotypes into an integer from 0 to 8"""
-    return(genos[0] + 3*genos[1])
+	"""turns each pair of genotypes into an integer from 0 to 8"""
+	return(genos[0] + 3*genos[1])
 
 
 @optional_numba_decorator
 def get_LL_numba(Q, H, code):
-    """returns the loglikelihood of the genotype data given Q and H
-    Q = admixture fractions
-    H = estimates of source-specific haplotype frequencies"""
+	"""returns the loglikelihood of the genotype data given Q and H
+	Q = admixture fractions
+	H = estimates of source-specific haplotype frequencies"""
 
-    ind_hap_freqs = np.dot(Q, H)
-    LL = 0.0
-    # had to index the tuples returned by np.where
-    LL += np.log(    ind_hap_freqs[np.where(code == 0)[0], 0] * ind_hap_freqs[np.where(code == 0)[0], 0]).sum()
-    LL += np.log(2 * ind_hap_freqs[np.where(code == 1)[0], 0] * ind_hap_freqs[np.where(code == 1)[0], 2]).sum()
-    LL += np.log(    ind_hap_freqs[np.where(code == 2)[0], 2] * ind_hap_freqs[np.where(code == 2)[0], 2]).sum()
-    LL += np.log(2 * ind_hap_freqs[np.where(code == 3)[0], 0] * ind_hap_freqs[np.where(code == 3)[0], 1]).sum()
-    LL += np.log(2 * ind_hap_freqs[np.where(code == 4)[0], 0] * ind_hap_freqs[np.where(code == 4)[0], 3]
-               + 2 * ind_hap_freqs[np.where(code == 4)[0], 1] * ind_hap_freqs[np.where(code == 4)[0], 2]).sum()
-    LL += np.log(2 * ind_hap_freqs[np.where(code == 5)[0], 2] * ind_hap_freqs[np.where(code == 5)[0], 3]).sum()
-    LL += np.log(    ind_hap_freqs[np.where(code == 6)[0], 1] * ind_hap_freqs[np.where(code == 6)[0], 1]).sum()
-    LL += np.log(2 * ind_hap_freqs[np.where(code == 7)[0], 1] * ind_hap_freqs[np.where(code == 7)[0], 3]).sum()
-    LL += np.log(    ind_hap_freqs[np.where(code == 8)[0], 3] * ind_hap_freqs[np.where(code == 8)[0], 3]).sum()
-    return(LL)
+	ind_hap_freqs = np.dot(Q, H)
+	LL = 0.0
+	# had to index the tuples returned by np.where
+	LL += np.log(    ind_hap_freqs[np.where(code == 0)[0], 0] * ind_hap_freqs[np.where(code == 0)[0], 0]).sum()
+	LL += np.log(2 * ind_hap_freqs[np.where(code == 1)[0], 0] * ind_hap_freqs[np.where(code == 1)[0], 2]).sum()
+	LL += np.log(    ind_hap_freqs[np.where(code == 2)[0], 2] * ind_hap_freqs[np.where(code == 2)[0], 2]).sum()
+	LL += np.log(2 * ind_hap_freqs[np.where(code == 3)[0], 0] * ind_hap_freqs[np.where(code == 3)[0], 1]).sum()
+	LL += np.log(2 * ind_hap_freqs[np.where(code == 4)[0], 0] * ind_hap_freqs[np.where(code == 4)[0], 3]
+	           + 2 * ind_hap_freqs[np.where(code == 4)[0], 1] * ind_hap_freqs[np.where(code == 4)[0], 2]).sum()
+	LL += np.log(2 * ind_hap_freqs[np.where(code == 5)[0], 2] * ind_hap_freqs[np.where(code == 5)[0], 3]).sum()
+	LL += np.log(    ind_hap_freqs[np.where(code == 6)[0], 1] * ind_hap_freqs[np.where(code == 6)[0], 1]).sum()
+	LL += np.log(2 * ind_hap_freqs[np.where(code == 7)[0], 1] * ind_hap_freqs[np.where(code == 7)[0], 3]).sum()
+	LL += np.log(    ind_hap_freqs[np.where(code == 8)[0], 3] * ind_hap_freqs[np.where(code == 8)[0], 3]).sum()
+	return(LL)
 
 
 @optional_numba_decorator
@@ -114,22 +118,22 @@ def do_multiEM(inputs):
 
 @optional_numba_decorator
 def get_sumstats_from_haplotype_freqs(H):
-    """given a set of four haplotype frequencies x populations, returns r^2, D, Dprime, and allele frequencies in each pop"""
-    # 00, 01, 10, 11
-    pA = H[:,2] + H[:,3]
-    pB = H[:,1] + H[:,3]
-    pAB= H[:,3]
-    D = pAB - pA*pB
-    # expected freqs
-    pa = 1.0 - pA
-    pb = 1.0 - pB
-    pApB = pA*pB
-    pApb = pA*pb
-    papB = pa*pB
-    papb = pa*pb
-    A = np.minimum(pApb, papB) # Dmax when D is positive
-    B = np.minimum(pApB, papb) # Dmax when D is negative
-    Dmax = np.where(D >= 0, A, B)
-    Dprime = D/Dmax
-    r2 = (D**2)/(pA*pB*pa*pb)
-    return(r2, D, Dprime, pA, pB)
+	"""given a set of four haplotype frequencies x populations, returns r^2, D, Dprime, and allele frequencies in each pop"""
+	# 00, 01, 10, 11
+	pA = H[:,2] + H[:,3]
+	pB = H[:,1] + H[:,3]
+	pAB= H[:,3]
+	D = pAB - pA*pB
+	# expected freqs
+	pa = 1.0 - pA
+	pb = 1.0 - pB
+	pApB = pA*pB
+	pApb = pA*pb
+	papB = pa*pB
+	papb = pa*pb
+	A = np.minimum(pApb, papB) # Dmax when D is positive
+	B = np.minimum(pApB, papb) # Dmax when D is negative
+	Dmax = np.where(D >= 0, A, B)
+	Dprime = D/Dmax
+	r2 = (D**2)/(pA*pB*pa*pb)
+	return(r2, D, Dprime, pA, pB)

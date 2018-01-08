@@ -21,7 +21,7 @@ import LDadmix_v8_funcs as LDadmix
 #	 # better deal with situations with lots of data - can we avoid holding all the results in memory prior to writing them out
 #	 # add check for valid chromosome names
 #	 # check for data across multiple chromosomes - should we enfore only a single chromosome in the bim file?
-#	 # deal with random seed - difficult due to threading issues
+#	 # deal with random seed - difficult due to threading issues - DONE?
 #	 # speed up loglike calculation?
 #	 # incorporate simulated data
 #	 # common output format for simulated data and analyzed data
@@ -29,6 +29,7 @@ import LDadmix_v8_funcs as LDadmix
 #	 # firm up an example data set
 #	 # compare the LD calculations external libraries that work on vcf
 #	 # add acknowledgements and a link to the greenland paper
+#    # create a log file
 
 
 # argparse
@@ -38,11 +39,14 @@ parser.add_argument('-Q', type=str, default = None, help='path to Q file')
 parser.add_argument('-G', type=str, default = './data/example_1', help='path to plink bed file')
 parser.add_argument('-O', type=str, default = '../scratch/example_1.out',  help='path to output file')
 parser.add_argument('-L', type=int, default=100000, help='maximum number of locus pairs to analyze, set to zero for no limit')
-parser.add_argument('-D', type=float, default=float(0), help='analyze only pairs of sites within this distance, set to zero for no limit')
+parser.add_argument('-D', type=float, default=np.float(0), help='analyze only pairs of sites within this distance, set to zero for no limit')
 parser.add_argument('-C', type=bool, default=False, help='use genetic postion, default is to use bp position')
+parser.add_argument('-N', type=bool, default=False, help='use the # of SNPs as the distance measure (NOT IMPLEMENTED)') # not implemented
+
 # Threading
 parser.add_argument('-P', type=int, default=4, help='number of threads')
 # EM
+parser.add_argument('-S', type=int, default=0, help='Random number seed used to initialize haplotype frequencies for the EM')
 parser.add_argument('-I', type=int, default=100, help='Max number of EM iterations')
 parser.add_argument('-T', type=float, default=1e-3, help='EM stopping tolerance')
 # Output
@@ -65,6 +69,8 @@ else:
 	print("Distance unit: bp")
 
 print("Number of threads: {}".format(args.P))
+print("Ranom number seed: {}".format(args.S))
+
 print("Max number of EM iterations: {}".format(args.I))
 print("------------------\n")
 
@@ -108,46 +114,80 @@ print("------------------\n")
 
 # bookkeeping
 data_nloci = geno_array.shape[0]
+possible_pairs = (data_nloci * data_nloci-1 )/2
 data_nsamples = geno_array.shape[1]
-max_pairs = int(args.L)
+
+
+### NEED TO REMAKE THIS ###
 max_dist  = float(args.D)
 
+def find_pairs_maxdist_generator(pos, maxdist):
+	for siteix, sitepos in enumerate(pos):
+		leftix = np.searchsorted(pos, sitepos - maxdist)
+		for altix in xrange(leftix, siteix):
+			yield ((altix, siteix))
+
+def find_genotypes_maxdist_generator(pos, maxdist, geno_array):
+	for siteix, sitepos in enumerate(pos):
+		leftix = np.searchsorted(pos, sitepos - maxdist)
+		for altix in xrange(leftix, siteix):
+			yield (geno_array[altix], geno_array[siteix])
+
 distance_pairs = None
+#positions = np.array([xx.bp_position for xx in locus_list])[:,None] # default to bp position
+positions = np.array([xx.bp_position for xx in locus_list]) # default to bp position
 if max_dist:
 	if args.C:
-		# use position
-		positions = np.array([xx.position for xx in locus_list])[:,None]
-	else:
-		# use bp position
-		positions = np.array([xx.bp_position for xx in locus_list])[:,None]
-	# make distance matrix
-	distm = scipy.spatial.distance.squareform(scipy.spatial.distance.pdist(positions))
-	# pairs that meet the criteria, remove double comparisons
-	distance_pairs = [x for x in zip(*np.where(distm<=max_dist)) if x[0]<x[1]]
-	#print('found {} pairs within {} units'.format(len(distance_pairs), max_dist))
+		positions = np.array([xx.position for xx in locus_list]) # use cM position
+	# make the iterator over genotype pairs
+	distance_genotypes = find_genotypes_maxdist_generator(positions, max_dist, geno_array)
+
 
 # determine how many pairs will be analyzed
-if max_dist:
-	if max_pairs:
-		npairs = min(len(distance_pairs), max_pairs)
-	else:
-		npairs = len(distance_pairs)
-elif max_pairs:
-	npairs = min((data_nloci*(data_nloci-1)/2), max_pairs) # minimum of limit
-else:
-	npairs = (data_nloci*(data_nloci-1)/2)
+#if max_dist:
+#	if max_pairs:
+#		npairs = min(len(distance_pairs), max_pairs)
+#	else:
+#		npairs = len(distance_pairs)
+#elif max_pairs:
+#	npairs = min((data_nloci*(data_nloci-1)/2), max_pairs) # minimum of limit
+#else:
+#	npairs = (data_nloci*(data_nloci-1)/2)
+
 
 npops = q.shape[1]
 
 print("\n------------------")
-print("Analysis will proceed for {}/{} possible locus pairs.".format(npairs, (data_nloci*(data_nloci-1)/2)))
+max_pairs = int(args.L)
+if max_pairs == 0:
+	max_pairs = None
+FIND_PAIRS_BEFORE = True
+if FIND_PAIRS_BEFORE:
+	if max_dist:
+		distance_pairs = len(list(find_pairs_maxdist_generator(positions, max_dist)))
+	else:
+		distance_pairs = possible_pairs
+	if max_pairs:
+		analysis_pairs = min(distance_pairs, max_pairs, possible_pairs)
+	else:
+		analysis_pairs = min(distance_pairs, possible_pairs)
+	print distance_pairs, max_pairs
+	print("Analysis will proceed for {}/{} of possible locus pairs.".format(analysis_pairs, possible_pairs))
 
 start_time = time.time()
 # make input iterators
-Hs = itertools.imap(LDadmix.get_rand_hap_freqs, itertools.repeat(npops, npairs)) # the repeat length will stop after npairs iterations
-Qs = itertools.repeat(q, )
+
+# deal with seeds
+SEED = args.S
+if SEED == 0:
+	SEED = np.random.randint(4294967295)
+seeds = xrange(SEED, SEED+min(max_pairs, possible_pairs)) #  use sequential seeds
+
+Hs = itertools.imap(LDadmix.get_rand_hap_freqs, itertools.repeat(npops), seeds)
+Qs = itertools.repeat(q)
 if max_dist:
-	codes = itertools.imap(LDadmix.get_geno_codes, [(geno_array[x], geno_array[y]) for (x,y) in distance_pairs])
+	#codes = itertools.imap(LDadmix.get_geno_codes, [(geno_array[x], geno_array[y]) for (x,y) in distance_pairs])
+	codes = itertools.imap(LDadmix.get_geno_codes, distance_genotypes)
 else:
 	codes = itertools.imap(LDadmix.get_geno_codes, itertools.combinations(geno_array, 2)) # use all pairs
 iter_iter = itertools.repeat(args.I)
@@ -157,7 +197,7 @@ inputs = itertools.izip(Hs, Qs, codes, iter_iter, tol_iter)
 # set up for multiprocessing
 cpu = args.P
 pool = multiprocessing.Pool(processes = cpu)
-print("Using {} cpus".format(cpu))
+print("Using {} cpu(s)".format(cpu))
 # do the calculations
 pool_outputs = pool.map(func = LDadmix.do_multiEM, iterable=inputs)
 pool.close() # no more tasks
