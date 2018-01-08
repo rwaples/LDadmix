@@ -15,21 +15,23 @@ from plinkio import plinkfile
 import LDadmix_v8_funcs as LDadmix
 
 # ## TODO
-#	 # deal with missing data - missing genotypes appear as '3' in the genotype matrix
-#	 # deal with a haplotype that is fixed in one population.
-#	 # do we need a test for fixed sites?
-#	 # better deal with situations with lots of data - can we avoid holding all the results in memory prior to writing them out
-#	 # add check for valid chromosome names
-#	 # check for data across multiple chromosomes - should we enfore only a single chromosome in the bim file?
-#	 # deal with random seed - difficult due to threading issues - DONE?
-#	 # speed up loglike calculation?
-#	 # incorporate simulated data
-#	 # common output format for simulated data and analyzed data
-#	 # Python 3?
-#	 # firm up an example data set
-#	 # compare the LD calculations external libraries that work on vcf
-#	 # add acknowledgements and a link to the greenland paper
-#    # create a log file
+#	# deal with missing data - missing genotypes appear as '3' in the genotype matrix
+#	# deal with a haplotype that is fixed in one population.
+#	# do we need a test for fixed sites?
+#	# benchmark
+#	# better deal with situations with lots of data - can we avoid holding all the results in memory prior to writing them out
+#	# add check for valid chromosome names
+#	# check for data across multiple chromosomes - should we enfore only a single chromosome in the bim file?
+#	# deal with random seed - difficult due to threading issues - DONE?
+#	# speed up loglike calculation?
+#	# incorporate simulated data
+#	# common output format for simulated data and analyzed data
+#	# Python 3?
+#	# firm up an example data set
+#	# compare the LD calculations external libraries that work on vcf
+#	# add acknowledgements and a link to the greenland paper
+#	# create a log file
+#	# have a clear way to get the list of locus pairs to be dealt with
 
 
 # argparse
@@ -52,6 +54,8 @@ parser.add_argument('-T', type=float, default=1e-3, help='EM stopping tolerance'
 # Output
 parser.add_argument('-F', type=str, default='LONG', help='Output format')
 parser.add_argument('-R', type=int, default=3, help='Output precision')
+parser.add_argument('-B', type=int, default=1000000, help='Batch size, the number of pairs to analyze between each write to disk.')
+
 
 args = parser.parse_args()
 
@@ -171,7 +175,6 @@ if FIND_PAIRS_BEFORE:
 		analysis_pairs = min(distance_pairs, max_pairs, possible_pairs)
 	else:
 		analysis_pairs = min(distance_pairs, possible_pairs)
-	print distance_pairs, max_pairs
 	print("Analysis will proceed for {}/{} of possible locus pairs.".format(analysis_pairs, possible_pairs))
 
 start_time = time.time()
@@ -196,61 +199,127 @@ inputs = itertools.izip(Hs, Qs, codes, iter_iter, tol_iter)
 
 # set up for multiprocessing
 cpu = args.P
-pool = multiprocessing.Pool(processes = cpu)
 print("Using {} cpu(s)".format(cpu))
-# do the calculations
-pool_outputs = pool.map(func = LDadmix.do_multiEM, iterable=inputs)
-pool.close() # no more tasks
-pool.join()
 
-print('Done!')
-print('*** Running time ***')
-print("*** {:.2f} seconds ***".format(time.time() - start_time))
-print("------------------\n ")
+BATCH_OUTPUT = True
+if BATCH_OUTPUT:
+	# break up the analysis into parts
+	BATCH_SIZE = args.B
 
-print("\n------------------ ")
-print("Writing results file: {}".format(args.O))
+	def grouper(iterable, n):
+		"""	from https://stackoverflow.com/a/8991553"""
+		it = iter(iterable)
+		while True:
+		   chunk = tuple(itertools.islice(it, n))
+		   if not chunk:
+		       return
+		   yield chunk
 
-if args.F == 'LONG': # write the long-style output (one line per pop/locus pair)
+	if max_dist:
+		pairs = find_pairs_maxdist_generator(positions, max_dist)
+	else:
+		pairs = itertools.combinations(xrange(data_nloci), 2)
+
+
+	# write header
 	with open(args.O, 'w') as OUTFILE:
-		# write header
 		header = ['Locus1', 'Locus2', 'genetic_dist', 'bp_dist', 'Pop', 'r2', 'D', 'Dprime', 'freq1', 'freq2',
 			'Hap00', 'Hap01', 'Hap10', 'Hap11', 'loglike', 'nIter']
 		OUTFILE.write('\t'.join(header))
 		OUTFILE.write('\n')
-		# for each locus pair
-		if max_dist:
-			pairs = itertools.chain(distance_pairs)
-		else:
-			pairs = itertools.combinations(xrange(data_nloci), 2)
-		for res in pool_outputs:
-			pair = next(pairs)
-			r2, D, Dprime, pA, pB = LDadmix.get_sumstats_from_haplotype_freqs(res[0])
-			for pop in xrange(npops):
 
-				# get the locus names here, quick hack
-				locusname_1 = locus_list[pair[0]].name
-				locusname_2 = locus_list[pair[1]].name
-				OUTFILE.write('{}\t{}\t'.format(locusname_1, locusname_2))
+	batch_count = 0
+	for input_batch in grouper(inputs, BATCH_SIZE):
+		pool = multiprocessing.Pool(processes = cpu)
+		pool_outputs = pool.map(func = LDadmix.do_multiEM, iterable=input_batch)
+		pool.close() # no more tasks
+		pool.join()
+		print "--batch {} done--".format(batch_count)
+		batch_count += 1
 
-				# get the distances here, quick hack
-				pair_distance_genetic = np.abs(locus_list[pair[0]].position - locus_list[pair[1]].position)
-				pair_distance_bp =  np.abs(locus_list[pair[0]].bp_position - locus_list[pair[1]].bp_position)
-				OUTFILE.write('{}\t{}\t'.format(pair_distance_genetic, pair_distance_bp))
+		with open(args.O, 'a') as OUTFILE:
+			for res in pool_outputs:
+				pair = next(pairs)
+				r2, D, Dprime, pA, pB = LDadmix.get_sumstats_from_haplotype_freqs(res[0])
+				for pop in xrange(npops):
 
-				OUTFILE.write('{}\t'.format(pop))
-				OUTFILE.write('{:.{precision}}\t'.format(r2[pop], precision = args.R))
-				OUTFILE.write('{:.{precision}}\t'.format(D[pop], precision = args.R))
-				OUTFILE.write('{:.{precision}}\t'.format(Dprime[pop], precision = args.R))
-				OUTFILE.write('{:.{precision}f}\t'.format(pA[pop], precision = args.R))
-				OUTFILE.write('{:.{precision}f}\t'.format(pB[pop], precision = args.R))
-				for xx in res[0][pop]:
-					OUTFILE.write('{:.{precision}}\t'.format(xx, precision = args.R))
-				OUTFILE.write('{:.{precision}}\t'.format(res[1], precision = 10))
-				OUTFILE.write('{}'.format(res[2]))
-				OUTFILE.write('\n')
+					# get the locus names here, quick hack
+					locusname_1 = locus_list[pair[0]].name
+					locusname_2 = locus_list[pair[1]].name
+					OUTFILE.write('{}\t{}\t'.format(locusname_1, locusname_2))
+
+					# get the distances here, quick hack
+					pair_distance_genetic = np.abs(locus_list[pair[0]].position - locus_list[pair[1]].position)
+					pair_distance_bp =  np.abs(locus_list[pair[0]].bp_position - locus_list[pair[1]].bp_position)
+					OUTFILE.write('{}\t{}\t'.format(pair_distance_genetic, pair_distance_bp))
+
+					OUTFILE.write('{}\t'.format(pop))
+					OUTFILE.write('{:.{precision}}\t'.format(r2[pop], precision = args.R))
+					OUTFILE.write('{:.{precision}}\t'.format(D[pop], precision = args.R))
+					OUTFILE.write('{:.{precision}}\t'.format(Dprime[pop], precision = args.R))
+					OUTFILE.write('{:.{precision}f}\t'.format(pA[pop], precision = args.R))
+					OUTFILE.write('{:.{precision}f}\t'.format(pB[pop], precision = args.R))
+					for xx in res[0][pop]:
+						OUTFILE.write('{:.{precision}}\t'.format(xx, precision = args.R))
+					OUTFILE.write('{:.{precision}}\t'.format(res[1], precision = 10))
+					OUTFILE.write('{}'.format(res[2]))
+					OUTFILE.write('\n')
 
 
+
+else: # non-batched output
+	pool = multiprocessing.Pool(processes = cpu)
+	# do the calculations
+	pool_outputs = pool.map(func = LDadmix.do_multiEM, iterable=inputs)
+	pool.close() # no more tasks
+	pool.join()
+
+	print('Done!')
+	print('*** Running time ***')
+	print("*** {:.2f} seconds ***".format(time.time() - start_time))
+	print("------------------\n ")
+
+	print("\n------------------ ")
+	print("Writing results file: {}".format(args.O))
+
+	if args.F == 'LONG': # write the long-style output (one line per pop/locus pair)
+		with open(args.O, 'w') as OUTFILE:
+			# write header
+			header = ['Locus1', 'Locus2', 'genetic_dist', 'bp_dist', 'Pop', 'r2', 'D', 'Dprime', 'freq1', 'freq2',
+				'Hap00', 'Hap01', 'Hap10', 'Hap11', 'loglike', 'nIter']
+			OUTFILE.write('\t'.join(header))
+			OUTFILE.write('\n')
+			# for each locus pair
+			if max_dist:
+				pairs = itertools.chain(distance_pairs)
+			else:
+				pairs = itertools.combinations(xrange(data_nloci), 2)
+			for res in pool_outputs:
+				pair = next(pairs)
+				r2, D, Dprime, pA, pB = LDadmix.get_sumstats_from_haplotype_freqs(res[0])
+				for pop in xrange(npops):
+
+					# get the locus names here, quick hack
+					locusname_1 = locus_list[pair[0]].name
+					locusname_2 = locus_list[pair[1]].name
+					OUTFILE.write('{}\t{}\t'.format(locusname_1, locusname_2))
+
+					# get the distances here, quick hack
+					pair_distance_genetic = np.abs(locus_list[pair[0]].position - locus_list[pair[1]].position)
+					pair_distance_bp =  np.abs(locus_list[pair[0]].bp_position - locus_list[pair[1]].bp_position)
+					OUTFILE.write('{}\t{}\t'.format(pair_distance_genetic, pair_distance_bp))
+
+					OUTFILE.write('{}\t'.format(pop))
+					OUTFILE.write('{:.{precision}}\t'.format(r2[pop], precision = args.R))
+					OUTFILE.write('{:.{precision}}\t'.format(D[pop], precision = args.R))
+					OUTFILE.write('{:.{precision}}\t'.format(Dprime[pop], precision = args.R))
+					OUTFILE.write('{:.{precision}f}\t'.format(pA[pop], precision = args.R))
+					OUTFILE.write('{:.{precision}f}\t'.format(pB[pop], precision = args.R))
+					for xx in res[0][pop]:
+						OUTFILE.write('{:.{precision}}\t'.format(xx, precision = args.R))
+					OUTFILE.write('{:.{precision}}\t'.format(res[1], precision = 10))
+					OUTFILE.write('{}'.format(res[2]))
+					OUTFILE.write('\n')
 
 print( "Done writing results file, exiting")
 print("------------------\n ")
