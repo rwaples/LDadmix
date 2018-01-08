@@ -44,7 +44,6 @@ parser.add_argument('-L', type=int, default=100000, help='maximum number of locu
 parser.add_argument('-D', type=float, default=np.float(0), help='analyze only pairs of sites within this distance, set to zero for no limit')
 parser.add_argument('-C', type=bool, default=False, help='use genetic postion, default is to use bp position')
 parser.add_argument('-N', type=bool, default=False, help='use the # of SNPs as the distance measure (NOT IMPLEMENTED)') # not implemented
-
 # Threading
 parser.add_argument('-P', type=int, default=4, help='number of threads')
 # EM
@@ -56,9 +55,7 @@ parser.add_argument('-F', type=str, default='LONG', help='Output format')
 parser.add_argument('-R', type=int, default=3, help='Output precision')
 parser.add_argument('-B', type=int, default=1000000, help='Batch size, the number of pairs to analyze between each write to disk.')
 
-
 args = parser.parse_args()
-
 
 
 print("\n------------------\nParameters: ")
@@ -73,7 +70,10 @@ else:
 	print("Distance unit: bp")
 
 print("Number of threads: {}".format(args.P))
-print("Ranom number seed: {}".format(args.S))
+SEED = args.S
+if SEED == 0:
+	SEED = np.random.randint(4294967295)
+print("Ranom seed: {}".format(SEED))
 
 print("Max number of EM iterations: {}".format(args.I))
 print("------------------\n")
@@ -105,9 +105,7 @@ else:
 	q = pd.read_csv(args.Q, header = None, sep = ' ')
 	q = q.values
 print("Shape of Q data:\n\t{}\tindividuals\n\t{}\tpopulations".format(q.shape[0], q.shape[1]))
-
-
-# quick sanity checks
+# quick sanity check
 assert(q.shape[0] == geno_array.shape[1]), "The number of individuals in the Q file doesn't match the G file!"
 
 print("Done loading data, starting LDadmix.")
@@ -120,9 +118,8 @@ print("------------------\n")
 data_nloci = geno_array.shape[0]
 possible_pairs = (data_nloci * data_nloci-1 )/2
 data_nsamples = geno_array.shape[1]
+npops = q.shape[1]
 
-
-### NEED TO REMAKE THIS ###
 max_dist  = float(args.D)
 
 def find_pairs_maxdist_generator(pos, maxdist):
@@ -147,20 +144,6 @@ if max_dist:
 	distance_genotypes = find_genotypes_maxdist_generator(positions, max_dist, geno_array)
 
 
-# determine how many pairs will be analyzed
-#if max_dist:
-#	if max_pairs:
-#		npairs = min(len(distance_pairs), max_pairs)
-#	else:
-#		npairs = len(distance_pairs)
-#elif max_pairs:
-#	npairs = min((data_nloci*(data_nloci-1)/2), max_pairs) # minimum of limit
-#else:
-#	npairs = (data_nloci*(data_nloci-1)/2)
-
-
-npops = q.shape[1]
-
 print("\n------------------")
 max_pairs = int(args.L)
 if max_pairs == 0:
@@ -177,13 +160,10 @@ if FIND_PAIRS_BEFORE:
 		analysis_pairs = min(distance_pairs, possible_pairs)
 	print("Analysis will proceed for {}/{} of possible locus pairs.".format(analysis_pairs, possible_pairs))
 
-start_time = time.time()
 # make input iterators
 
 # deal with seeds
-SEED = args.S
-if SEED == 0:
-	SEED = np.random.randint(4294967295)
+
 seeds = xrange(SEED, SEED+min(max_pairs, possible_pairs)) #  use sequential seeds
 
 Hs = itertools.imap(LDadmix.get_rand_hap_freqs, itertools.repeat(npops), seeds)
@@ -200,6 +180,7 @@ inputs = itertools.izip(Hs, Qs, codes, iter_iter, tol_iter)
 # set up for multiprocessing
 cpu = args.P
 print("Using {} cpu(s)".format(cpu))
+start_time = time.time()
 
 BATCH_OUTPUT = True
 if BATCH_OUTPUT:
@@ -207,7 +188,9 @@ if BATCH_OUTPUT:
 	BATCH_SIZE = args.B
 
 	def grouper(iterable, n):
-		"""	from https://stackoverflow.com/a/8991553"""
+		"""	provides the iterable in batches of size n
+		last batch is not padded and can be smaller
+		from https://stackoverflow.com/a/8991553"""
 		it = iter(iterable)
 		while True:
 		   chunk = tuple(itertools.islice(it, n))

@@ -17,4 +17,4 @@ python 2.7+
  - plinkio (https://github.com/mfranberg/libplinkio) [install with: "pip install plinkio
 "]
 ### optional python packages
- - numba (will speed up the calculations)
+ - numba (highly recommended, will speed up the analysis ~100 fold)
