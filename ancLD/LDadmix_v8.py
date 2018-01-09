@@ -89,6 +89,10 @@ def load_plinkfile(basepath):
 	#if 3 in np.unique(my_array):
 	#	has_missing = True
 		# not sure what to do with missing data yet
+		# could expand the genotype codes to accomidate the 3
+		# e.g.g genos[0] + 3*genos[1] -> genos[0] + 4*genos[1]
+		# and update the G test accordingly
+		# as written will likely cause a division by zero when normalizing over individuals
 	return(sample_list, locus_list, my_array.astype(np.int))
 
 

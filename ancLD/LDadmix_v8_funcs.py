@@ -35,7 +35,7 @@ def get_rand_hap_freqs(n=2, SEED = None):
 
 @optional_numba_decorator
 def get_geno_codes(genos):
-	"""turns each pair of genotypes into an integer from 0 to 8"""
+	"""maps each pair of genotypes into an integer from 0 to 8"""
 	return(genos[0] + 3*genos[1])
 
 
@@ -74,7 +74,7 @@ def do_multiEM(inputs):
 
     # start iteration here
     for i in xrange(max_iter):
-        norm = np.zeros(n_ind)
+        norm = np.zeros(n_ind) # maybe just change this to a matrix of ones - then set to zero if data is found to be non-missing
         isum = np.zeros((n_ind, n_pops, 4)) # hold sums over the 4 haplotypes from each pop in each ind
         for hap1 in xrange(4):                                # index of haplotype in first spot
             for hap2 in xrange(4):                            # index of haplotype in second spot
@@ -86,10 +86,11 @@ def do_multiEM(inputs):
                                 isum[ind, z1, hap1] += raw
                                 isum[ind, z2, hap2] += raw
                                 norm[ind] += raw
-
+					# could also deal with individuals with missing data here - maybe by setting norm to 1?
         # normalized sum over individuals
         post = np.zeros((n_pops, 4))
         for ind in xrange(n_ind):
+			# if norm[ind] > 0: # optinal way to skip individuals with missing data
             for z in xrange(n_pops):
                 for hap in xrange(4):
                     post[z, hap] += isum[ind, z, hap]/norm[ind] #  can we use this estimate an 'effective sample size?'
