@@ -30,24 +30,25 @@ import LDadmix_v8_funcs as LDadmix
 #	# firm up an example data set
 #	# compare the LD calculations external libraries that work on vcf
 #	# add acknowledgements and a link to the greenland paper
-#	# create a log file
+#	# create a log file with each run
 #	# have a clear way to get the list of locus pairs to be dealt with
+#	# maybe should ditch the likelihood calculations (maybe optionally) and use delta in haplotype freqs as the stopping condition
 
 
 # argparse
 parser = argparse.ArgumentParser()
 # Input
 parser.add_argument('-Q', type=str, default = None, help='path to Q file')
-parser.add_argument('-G', type=str, default = './data/example_1', help='path to plink bed file')
+parser.add_argument('-G', type=str, default = './data/example_1', help='path to plink fileset - looks for *.bed/bim/fam')
 parser.add_argument('-O', type=str, default = '../scratch/example_1.out',  help='path to output file')
 parser.add_argument('-L', type=int, default=100000, help='maximum number of locus pairs to analyze, set to zero for no limit')
 parser.add_argument('-D', type=float, default=np.float(0), help='analyze only pairs of sites within this distance, set to zero for no limit')
 parser.add_argument('-C', type=bool, default=False, help='use genetic postion, default is to use bp position')
-parser.add_argument('-N', type=bool, default=False, help='use the # of SNPs as the distance measure (NOT IMPLEMENTED)') # not implemented
+parser.add_argument('-N', type=bool, default=False, help='use the # of SNPs as the distance measure (-NOT IMPLEMENTED-)') # not implemented
 # Threading
 parser.add_argument('-P', type=int, default=4, help='number of threads')
 # EM
-parser.add_argument('-S', type=int, default=0, help='Random number seed used to initialize haplotype frequencies for the EM')
+parser.add_argument('-S', type=int, default=0, help='Random number seed used to initialize starting haplotype frequencies')
 parser.add_argument('-I', type=int, default=100, help='Max number of EM iterations')
 parser.add_argument('-T', type=float, default=1e-3, help='EM stopping tolerance')
 # Output
