@@ -14,6 +14,7 @@ python 2.7+
 ### python packages
  - numpy
  - scipy
+ - pandas
  - plinkio (https://github.com/mfranberg/libplinkio) [install with: "pip install plinkio
 "]
 ### optional python packages
