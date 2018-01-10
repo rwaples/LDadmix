@@ -155,13 +155,13 @@ possible_pairs_on_chr = dict()
 for CHR in seen_chromosomes:
 	loci_on_chr[CHR] = filter(lambda x: x.chromosome == CHR, locus_list)
 	nloci_on_chr[CHR] = len(loci_on_chr[CHR])
-	possible_pairs_on_chr[CHR] = (nloci_on_chr[CHR]*nloci_on_chr[CHR]-1)/2
+	possible_pairs_on_chr[CHR] = (nloci_on_chr[CHR]*(nloci_on_chr[CHR]-1))/2
 	geno_array_of_chr[CHR] = geno_array[np.array([(locus.chromosome == CHR) for locus in locus_list])]
 for (CHR, count) in nloci_on_chr.items():
 	print ("\t{} loci on chromosome {}".format(count, CHR))
 
 possible_pairs = sum(possible_pairs_on_chr.values())
-print ("\nThere areup to {} possible pairs to analyze".format(possible_pairs))
+print ("\nThere are up to {} locus pairs to analyze".format(possible_pairs))
 
 
 def find_pairs_maxdist_generator(pos, maxdist, loc):
@@ -210,9 +210,6 @@ distance_genotypes = itertools.chain.from_iterable(distance_genotypes_chain) # i
 distance_pairs = itertools.chain.from_iterable(distance_pairs_chain) # used to keep track of input
 
 
-#print LDadmix.get_geno_codes(next(distance_genotypes))
-#assert False
-
 max_pairs = int(args.L)
 if max_pairs == 0:
 	max_pairs = None
@@ -247,23 +244,21 @@ iter_iter = itertools.repeat(args.I)
 tol_iter = itertools.repeat(args.T)
 inputs = itertools.izip(Hs, Qs, codes, iter_iter, tol_iter)
 
-# set up for multiprocessing
-cpu = args.P
-print("Using {} cpu(s)".format(cpu))
-start_time = time.time()
-
 print("\nDone with setup")
 print("------------------\n")
 
 ### Analyze
 print("\n------------------")
 print("Starting the analysis\n")
-
+cpu = args.P
+print("Using {} cpu(s)".format(cpu))
+start_time = time.time()
 
 BATCH_OUTPUT = True
 if BATCH_OUTPUT:
 	# break up the analysis into parts
 	BATCH_SIZE = args.B
+	print("Using a batch size of {} locus pairs".format(BATCH_SIZE))
 
 	def grouper(iterable, n):
 		"""	provides the iterable in batches of size n
@@ -295,7 +290,7 @@ if BATCH_OUTPUT:
 		pool_outputs = pool.map(func = LDadmix.do_multiEM, iterable=input_batch)
 		pool.close() # no more tasks
 		pool.join()
-		print "--batch {} done--".format(batch_count)
+		print "\t--batch {} done, writing results--".format(batch_count)
 		batch_count += 1
 
 		with open(args.O, 'a') as OUTFILE:
