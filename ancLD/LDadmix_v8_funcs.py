@@ -6,10 +6,14 @@ NUMBA = False
 try:
 	from numba import jit
 	NUMBA = True
+	print("------------------")
 	print("Numba import successful")
-except ImportError:
-	print("Import of numba failed, code will run slower")
+	print("------------------\n")
 
+except ImportError:
+	print("------------------")
+	print("Import of numba failed, analysis will run significantly slower")
+	print("------------------\n")
 # decorator depending on numba, if numba is found, will decorate with: jit(nopython=True)
 def optional_numba_decorator(func):
 	if NUMBA:

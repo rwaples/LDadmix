@@ -36,7 +36,8 @@ import LDadmix_v8_funcs as LDadmix
 #	# maybe should ditch the likelihood calculations (maybe optionally) and use delta in haplotype freqs as the stopping condition
 #   # allow data across multiple chromosomes - will be analyzed within each
 #   # test that loci are in sorted order - I am assuming this
-#   # make sure the ordering of pair in distance loci is consistent with the code
+#   # make sure the ordering of pair in distance loci is consistent with the code - DONE
+#   # test the effect of chunksize in pool.imap()
 
 
 # argparse
@@ -65,7 +66,7 @@ args = parser.parse_args()
 
 print("\n------------------\nParameters: ")
 print("Q file: {}".format(args.Q))
-print("Plink files: {}".format(args.G))
+print("Plink fileset: {}".format(args.G))
 print("Output file: {}".format(args.O))
 print("Max number of locus pairs: {}  (0 = no limit)".format(args.L))
 print("Max distance of locus pairs to analyze: {}".format(args.D))
@@ -202,6 +203,7 @@ for CHR in seen_chromosomes:
 	#print positions
 	assert np.all(np.diff(positions) >=0) #ensure the positions are monotonically increasing (sorted)
 	# make the iterator over genotype pairs
+	# are these taking up the momory?
 	distance_genotypes_chain.append(find_genotypes_maxdist_generator(positions, max_dist, geno_array_of_chr[CHR]))
 	distance_pairs_chain.append(find_pairs_maxdist_generator(positions, max_dist, loci_on_chr[CHR]))
 
@@ -233,7 +235,10 @@ else:
 
 # deal with seeds
 
-seeds = xrange(SEED, SEED+possible_pairs) #  use sequential seeds
+if max_pairs:
+	seeds = xrange(SEED, SEED+min(possible_pairs, max_pairs))
+else:
+	seeds = xrange(SEED, SEED+possible_pairs) #  use sequential seeds
 Hs = itertools.imap(LDadmix.get_rand_hap_freqs, itertools.repeat(npops), seeds)
 Qs = itertools.repeat(q)
 #if max_dist:
@@ -286,11 +291,13 @@ if BATCH_OUTPUT:
 
 	batch_count = 0
 	for input_batch in grouper(inputs, BATCH_SIZE):
+		start_time = time.time()
 		pool = multiprocessing.Pool(processes = cpu)
-		pool_outputs = pool.map(func = LDadmix.do_multiEM, iterable=input_batch)
+		pool_outputs = pool.imap(func = LDadmix.do_multiEM, iterable=input_batch, chunksize = 10)
 		pool.close() # no more tasks
 		pool.join()
-		print "\t--batch {} done, writing results--".format(batch_count)
+		end_time = time.time()
+		print "\tbatch {} done in {:6.6f} seconds, writing results--".format(batch_count, end_time - start_time)
 		batch_count += 1
 
 		with open(args.O, 'a') as OUTFILE:
