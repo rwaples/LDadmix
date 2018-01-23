@@ -220,7 +220,7 @@ for CHR in seen_chromosomes:
 			EM_iter = EM_ITER_LIMIT, EM_tol = EM_TOL, seeds = sharedSeeds_np)
 		#print (batch_EM_res)
 		t2 = time.time()
-		print ("\t\tfinished in {:.4}").format(t2-t1)
+		print ("\t\tfinished in {:.6}\t writing to disk").format(t2-t1)
 
 		# make output
 		pop_dfs = []
@@ -252,7 +252,7 @@ for CHR in seen_chromosomes:
 		batch_EM_df = batch_EM_df[['i1', 'i2', 'locus1', 'locus2',  'CHR', 'bp_dist', 'genetic_dist', 'non_missing', 'pop', 'iter',
 			'logLike', 'Hap00', 'Hap01', 'Hap10', 'Hap11', 'r2', 'D', 'Dprime', 'p1', 'p2']].sort_values(['i1', 'i2', 'pop'])
 
-		print ("\tDone with batch {}, writing to disk".format(count))
+		#print ("\tDone with batch {}, writing to disk".format(count))
 
 		if GZIP: # compress the output/
 			compression = 'gzip'
