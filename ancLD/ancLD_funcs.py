@@ -1,7 +1,12 @@
 import multiprocessing
 import itertools
-import numpy as np
+import ctypes
 
+import numpy as np
+from plinkio import plinkfile
+#import pandas as pd
+
+NUMBA_DISABLE_JIT = 0
 NUMBA = False
 try:
 	from numba import jit
@@ -9,7 +14,6 @@ try:
 	print("------------------")
 	print("Numba import successful")
 	print("------------------\n")
-
 except ImportError:
 	print("------------------")
 	print("Import of numba failed, analysis will run significantly slower")
@@ -17,23 +21,57 @@ except ImportError:
 # decorator depending on numba, if numba is found, will decorate with: jit(nopython=True)
 def optional_numba_decorator(func):
 	if NUMBA:
-		return(jit(nopython=True)(func))
+		#return(jit(nopython=True)(func))
+		return(jit(nopython=True, nogil=True, cache=False)(func))
 	else:
 		return(func)
 
 
+def load_plinkfile(basepath):
+	plink_file = plinkfile.open(basepath)
+	sample_list = plink_file.get_samples()
+	locus_list = plink_file.get_loci()
+	my_array = np.zeros((len(plink_file.get_loci( )), len(plink_file.get_samples( ))))
+	for i, el in enumerate(plink_file):
+		my_array[i] = el
+	# look for missing data
+	has_missing = False
+	if 3 in np.unique(my_array):
+		has_missing = True
+		# replace missing values with nines - this will cause them to never match during genotype code checking
+		my_array[my_array == 3] = 9
+
+	my_array = my_array.astype('i1')
+	return(sample_list, locus_list, my_array, has_missing)
+
+
+def find_idxpairs_maxdist_generator(pos, maxdist):
+	"""iterator, yields tuples of indexes for all pairs of loci within maxdist
+	pos : positions of loci
+	maxdist : maximum distance apart"""
+	for siteix, sitepos in enumerate(pos):
+		if np.allclose(maxdist, 0):
+			leftix = 0
+		else:
+			leftix = np.searchsorted(pos, sitepos - maxdist) # index of the leftmost locus position with maxdist
+		for altix in xrange(leftix, siteix):
+			#yield ((altix, siteix))
+			yield altix
+			yield siteix
+
+
 @optional_numba_decorator
-def get_rand_hap_freqs(n=2, SEED = None):
+def get_rand_hap_freqs(n=2, seed = None):
 	"""returns an (n,4) dimensioned numpy array of random haplotype frequencies,
 	where n is the number of pops"""
-	if SEED:
-		np.random.seed(SEED)
+	if seed:
+		np.random.seed(seed)
 	else:
 		pass
-	res = np.zeros((n, 4))
+	H = np.zeros((n, 4))
 	for i in xrange(n):
-		res[i] = np.diff(np.concatenate((np.array([0]), np.sort(np.random.rand(3)), np.array([1.0]))))
-	return(res)
+		H[i] = np.diff(np.concatenate((np.array([0]), np.sort(np.random.rand(3)), np.array([1.0]))))
+	return(H)
 
 
 @optional_numba_decorator
@@ -41,6 +79,7 @@ def get_geno_codes(genos):
 	"""maps each pair of non-missing genotypes into an integer from 0 to 8
 	pairs with missing genotypes will map above 8"""
 	return(genos[0] + 3*genos[1])
+
 
 @optional_numba_decorator
 def get_LL_numba(Q, H, code):
@@ -64,19 +103,22 @@ def get_LL_numba(Q, H, code):
 	return(LL)
 
 
+# try G as a global
+#G = np.array([0,3,1,4, 3,6,4,7, 1,4,2,5, 4,7,5,8])
+
 @optional_numba_decorator
 def do_multiEM(inputs):
 	""""""
 	H, Q, code, max_iter, tol = inputs # unpack the input
 
-	n_ind = len(Q)
+	n_ind = Q.shape[0]
 	n_pops = Q.shape[1]
 	G = np.array([0,3,1,4, 3,6,4,7, 1,4,2,5, 4,7,5,8]) # which combinations of haplotypes produce which genotypes
 
 	old_LL = get_LL_numba(Q = Q, H = H , code = code)
 
 	# start iteration here
-	for i in xrange(max_iter):
+	for i in xrange(1, max_iter+1):
 		norm = np.zeros(n_ind) # maybe just change this to a matrix of ones - then set to zero if data is found to be non-missing
 		isum = np.zeros((n_ind, n_pops, 4)) # hold sums over the 4 haplotypes from each pop in each ind
 		for hap1 in xrange(4):								# index of haplotype in first spot
@@ -95,28 +137,98 @@ def do_multiEM(inputs):
 		for ind in xrange(n_ind):
 			for z in xrange(n_pops):
 				for hap in xrange(4):
+					#update post for each hap in each pop
 					post[z, hap] += isum[ind, z, hap]/norm[ind] #  can we use this estimate an 'effective sample size?'
-
-		# below doesn't currently work with numba, making the post loop above necessary
-		#post = 2*(isum / isum.sum((1,2))[:, np.newaxis,np.newaxis]).sum(0)
 
 		# scale the sums so they sum to one  - now represents the haplotype frequencies within pops
 		H = np.zeros((n_pops, 4))
-		for p in xrange(n_pops):
-			H[p] = post[p]/post[p].sum()
+		for z in xrange(n_pops):
+			H[z] = post[z]/np.sum(post[z])
 
-		# again numba doesn't like
-		#H = post/(post.sum(1)[:,np.newaxis])
+		#for h in H:
+		#	for j in h:
+		#		print(j)
 
 		new_LL = get_LL_numba(Q = Q, H = H , code = code)
 		delta_LL = new_LL - old_LL
-		assert(delta_LL >= 0)
 
-		if delta_LL < tol:
+		#if not (delta_LL >= 0):
+		#	if (np.abs(delta_LL/old_LL) < 1e-6):
+		#		break
+		#	else:
+		#		assert False, 'delta error'
+
+		if delta_LL <= tol:
 			break
 		old_LL = new_LL
 
 	return(H, new_LL, i)
+
+
+#@jit(#"void(int32[:, :], i1[:, :], f8[:, :], f8[:, :], i2, f8, i8, i8[:])",
+@optional_numba_decorator
+def multiprocess_EM_inner(pairs_inner, shared_genoMatrix, shared_resMatrix, Q, EM_iter, EM_tol, start_idx, seeds):
+	npops = Q.shape[1]
+	w = start_idx #  used to index the results matrix
+	for i in xrange(len(pairs_inner)):
+		pair = pairs_inner[i]
+		seed = seeds[i]
+		# get genotype codes
+
+		codes = shared_genoMatrix[pair[0]] + 3*shared_genoMatrix[pair[1]]
+
+		H = get_rand_hap_freqs(n = npops, seed = seed)
+
+		# do the EM
+		res_EM = do_multiEM((H, Q, codes, EM_iter, EM_tol))
+
+		# fill results matrix
+		shared_resMatrix[w,0] = pair[0] # index of first locus
+		shared_resMatrix[w,1] = pair[1] # index of second locus
+		shared_resMatrix[w,2] = np.sum(codes<9) # count non_missing
+		shared_resMatrix[w,3] = res_EM[1] # loglike
+		shared_resMatrix[w,4] = res_EM[2] # n_iter
+		ix = 0
+
+		#print res_EM[0]
+		# fill out the haplotype frequencies
+		for pop in xrange(npops):
+			for hap in xrange(4):
+				shared_resMatrix[w,5+ix] = res_EM[0][pop, hap]
+				ix+=1
+		w +=1
+
+
+def multiprocess_EM_outer(pairs_outer, shared_genoMatrix, Q, cpus, EM_iter, EM_tol, seeds):
+	# TODO pass seeds along in a better way
+
+	# spread the pairs across cpus
+	len_pairs = len(pairs_outer)
+	per_thread = int(np.ceil(len_pairs/float(cpus)))
+	ix_starts = itertools.chain([i * per_thread for i in xrange(cpus)])
+
+	# split across processes
+	jobs = np.split(pairs_outer, np.arange(per_thread, len_pairs, per_thread))
+
+	# make a shared results array
+	npops = Q.shape[1]
+	res_dim2 = 5 + 4*npops # loc1, loc2, count_non_missing, logL, iters, [hap freqs]
+	res = np.zeros((len(pairs_outer), res_dim2), dtype = 'f8')
+	sharedArray = multiprocessing.Array(ctypes.c_double, res.flatten(), lock = None)
+	shared_resMatrix = np.frombuffer(sharedArray.get_obj(), dtype='f8').reshape(res.shape)
+	del res
+
+	# set up processes
+	processes = [multiprocessing.Process(target=multiprocess_EM_inner, args=(job, shared_genoMatrix, shared_resMatrix,
+			Q, EM_iter, EM_tol, next(ix_starts), seeds)) for job in jobs]
+
+	# Run processes
+	for proc in processes:
+	    proc.start()
+	for proc in processes:
+	    proc.join()
+
+	return(shared_resMatrix)
 
 
 @optional_numba_decorator
