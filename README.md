@@ -21,11 +21,11 @@ python 2.7+
 ### output format
 
  - i1, i2 : index of locus[1/2] within chromosome
- - locus1, locus2 : name of locus[1/2], taken bim file
+ - locus1, locus2 : name of locus[1/2], taken from the .bim file
  - CHR : chromosome
- - bp_dist : base pair distance between the locus1 and locus2
- - genetic_dist : genetic pair distance between the locus1 and locus2
- - non_missing : the number of individuals with non-missing genotypes for the pair
+ - bp_dist : basepair distance between the locus1 and locus2
+ - genetic_dist : genetic distance between the locus1 and locus2
+ - non_missing : the number of individuals with non-missing genotypes
  - pop : population (based on position in Q file)
  - iter : number of EM iterations
  - logLike : (log)likelihood of the data at the termination of the EM
