@@ -19,6 +19,9 @@ python 2.7+
 
 
 ### output format
+Tab-delimited text file, one line per pair of loci per population.
+Output will be gzipped (\*.gz) with the -Z flag.  
+Output files can get large.
 
  - i1, i2 : index of locus[1/2] within chromosome
  - locus1, locus2 : name of locus[1/2], taken from the .bim file

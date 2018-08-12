@@ -11,7 +11,9 @@ import pandas as pd
 import scipy.stats
 
 
-import LDadmix_v8_funcs as LDadmix
+#import LDadmix_v8_funcs as LDadmix
+import ancLD_funcs as LDadmix
+
 import ancLD_simulate_funcs as ancLD_sim
 
 class Pop(object):
@@ -72,7 +74,6 @@ class Admixed_sample(object):
 		assert(self._2n <= self.hs1.n)
 		assert(self._2n <= self.hs2.n)
 
-
 		# determine the origin of each individual's haplotypes, prior to recombination : 2 haplotypes based on Q
 		self.source_pops = np.random.binomial(n = 1, p = np.repeat(Q, 2))
 		# prior to admixture
@@ -81,6 +82,7 @@ class Admixed_sample(object):
 
 		# where to deal with recombination
 		self.rec_events = np.random.binomial(n = 1, p = np.repeat(c, self._2n))
+		self.no_rec_source_pops = self.source_pops[(1-self.rec_events).astype('bool')] # source pops of the non-recombining haplotypes
 		which_keep = np.random.binomial(n = 1, p = np.repeat(0.5, self._2n)) # keep left or right
 		which_keep = np.vstack([which_keep, 1-which_keep]).T
 		self.raw_sources = np.where(self.rec_events[:, np.newaxis], which_keep, [0,0]) # use either admixed_haplotypes or alternate_haplotypes
@@ -91,16 +93,19 @@ class Admixed_sample(object):
 		repick_site2 = np.random.binomial(n = 1, p = np.where(self.repick_pop, self.hs2.p2_sample, self.hs1.p2_sample))
 		self.alternate_haplotypes = np.vstack([repick_site1, repick_site2]).T # still need to combine with admixed, not all are changing
 		self.haplotypes_post_admixture = np.where(self.raw_sources, self.alternate_haplotypes, self.haplotypes_prior_to_admixture)
-
 		self.hap_array = self.haplotypes_post_admixture
-
-		self.no_rec_source_pops = self.source_pops[(1-self.rec_events).astype('bool')] # source pops of the non-recombining haplotypes
-
 		# get the frequencies and counts from the resulting haplotypes
 		self.hap_freqs_sample = ancLD_sim.get_hap_freqs(self.hap_array)
 		self.hap_counts = ancLD_sim.get_hap_counts(self.hap_array)
-
+        
+# summarize the haplotypes from each K
+		self.hap_freqs_of_k =dict()
+		self.hap_counts_of_k =dict()
+		for k in [0,1]:
+			self.hap_freqs_of_k[k] = ancLD_sim.get_hap_freqs(self.hap_array[self.source_pops==k])
+			self.hap_counts_of_k[k] = ancLD_sim.get_hap_counts(self.hap_array[self.source_pops==k])
+		#geno codes
+		self.geno_codes = LDadmix.get_geno_codes((self.hap_array[::2] + np.roll(self.hap_array,-1, axis = 0)[::2]).T)       
 		# TODO summary stats of the admixed haplotypes
-
 		self.rec_count = self.rec_events.sum()
 		self.no_rec_count = self._2n - self.rec_events.sum()

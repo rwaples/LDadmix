@@ -3,4 +3,5 @@
 
 *.ipynb
 *.pyc
+*.py~
 *.log

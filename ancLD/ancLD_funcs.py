@@ -6,8 +6,10 @@ import numpy as np
 from plinkio import plinkfile
 #import pandas as pd
 
-NUMBA_DISABLE_JIT = 0
+#NUMBA_DISABLE_JIT = 0
 NUMBA = False
+RESOLVE_EDGE_CASES = 1
+
 try:
 	from numba import jit
 	NUMBA = True
@@ -22,7 +24,7 @@ except ImportError:
 def optional_numba_decorator(func):
 	if NUMBA:
 		#return(jit(nopython=True)(func))
-		return(jit(nopython=True, nogil=True, cache=False)(func))
+		return(jit(nopython=True, nogil=False, cache=False)(func))
 	else:
 		return(func)
 
@@ -61,10 +63,10 @@ def find_idxpairs_maxdist_generator(pos, maxdist):
 
 
 @optional_numba_decorator
-def get_rand_hap_freqs(n=2, seed = None):
+def get_rand_hap_freqs(n=2, seed = 0):
 	"""returns an (n,4) dimensioned numpy array of random haplotype frequencies,
 	where n is the number of pops"""
-	if seed:
+	if seed == 0:
 		np.random.seed(seed)
 	else:
 		pass
@@ -182,19 +184,28 @@ def multiprocess_EM_inner(pairs_inner, shared_genoMatrix, shared_resMatrix, Q, E
 		# do the EM
 		res_EM = do_multiEM((H, Q, codes, EM_iter, EM_tol))
 
+		flags = np.zeros(npops)
+		LL = res_EM[1]
+		H = res_EM[0]
+		if RESOLVE_EDGE_CASES:
+			flags, LL, H = check_boundaries(H=res_EM[0], Q=Q, LL=res_EM[1], codes=codes, zero_threshold = 1e-4)
+
 		# fill results matrix
 		shared_resMatrix[w,0] = pair[0] # index of first locus
 		shared_resMatrix[w,1] = pair[1] # index of second locus
 		shared_resMatrix[w,2] = np.sum(codes<9) # count non_missing
-		shared_resMatrix[w,3] = res_EM[1] # loglike
+		shared_resMatrix[w,3] = LL # loglike
 		shared_resMatrix[w,4] = res_EM[2] # n_iter
-		ix = 0
 
-		#print res_EM[0]
+		# fill out the flags
+		for ix in xrange(npops):
+			shared_resMatrix[w, 5+ix] = flags[ix]
+
 		# fill out the haplotype frequencies
+		ix = 0
 		for pop in xrange(npops):
 			for hap in xrange(4):
-				shared_resMatrix[w,5+ix] = res_EM[0][pop, hap]
+				shared_resMatrix[w, 5+npops+ix] = H[pop, hap]
 				ix+=1
 		w +=1
 
@@ -212,7 +223,7 @@ def multiprocess_EM_outer(pairs_outer, shared_genoMatrix, Q, cpus, EM_iter, EM_t
 
 	# make a shared results array
 	npops = Q.shape[1]
-	res_dim2 = 5 + 4*npops # loc1, loc2, count_non_missing, logL, iters, [hap freqs]
+	res_dim2 = 5 + 5*npops # loc1, loc2, count_non_missing, logL, iters, [flags],[hap freqs]
 	res = np.zeros((len(pairs_outer), res_dim2), dtype = 'f8')
 	sharedArray = multiprocessing.Array(ctypes.c_double, res.flatten(), lock = None)
 	shared_resMatrix = np.frombuffer(sharedArray.get_obj(), dtype='f8').reshape(res.shape)
@@ -229,6 +240,85 @@ def multiprocess_EM_outer(pairs_outer, shared_genoMatrix, Q, cpus, EM_iter, EM_t
 	    proc.join()
 
 	return(shared_resMatrix)
+
+
+def multiprocess_onelocusEM_outer(genos_outer, shared_genoMatrix, Q, cpus, EM_iter, EM_tol, seeds, bootstraps):
+	# TODO pass seeds along in a better way
+
+	# spread the pairs across cpus
+	len_genos = len(genos_outer)
+	per_thread = int(np.ceil(len_genos/float(cpus)))
+	ix_starts = itertools.chain([i * per_thread for i in xrange(cpus)])
+
+	# split across processes
+	jobs = np.split(genos_outer, np.arange(per_thread, len_genos, per_thread))
+
+	# make a shared results array
+	npops = Q.shape[1]
+	res_dim2 = 4+3*npops # loc, count_non_missing, logL, iters, [population_freqs]
+	res = np.zeros((len(genos_outer), res_dim2), dtype = 'f8')
+	sharedArray = multiprocessing.Array(ctypes.c_double, res.flatten(), lock = None)
+	shared_resMatrix = np.frombuffer(sharedArray.get_obj(), dtype='f8').reshape(res.shape)
+	print "size of res matrix:"
+	print shared_resMatrix.shape
+	del res
+
+	n = Q.shape[0]
+	genos_resample = np.zeros(n, dtype = 'i1')
+	Q_resample = np.zeros((n, Q.shape[1]), dtype = 'f8')
+	# set up processes
+	processes = [multiprocessing.Process(target=multiprocess_onelocusEM_inner, args=(job, shared_genoMatrix, shared_resMatrix,
+			Q, EM_iter, EM_tol, next(ix_starts), seeds, bootstraps, genos_resample, Q_resample)) for job in jobs]
+
+	# Run processes
+	for proc in processes:
+	    proc.start()
+	for proc in processes:
+	    proc.join()
+
+	return(shared_resMatrix)
+
+@jit(nopython=True)
+def multiprocess_onelocusEM_inner(genos_inner, shared_genoMatrix, shared_resMatrix, Q, EM_iter, EM_tol, start_idx, seeds, bootstraps, genos_resample, Q_resample):
+	npops = Q.shape[1]
+	w = start_idx #  used to index the results matrix
+	for i in xrange(len(genos_inner)):
+		locus = genos_inner[i]
+		seed = seeds[i]
+		# get genotype codes
+		codes = shared_genoMatrix[locus]
+		non_missing = len(codes[codes<=2])
+		# do the EM
+		maf = np.array([0.5, 0.5])
+		maf_em, niter, LL = emFreqAdmix(codes, Q, maf, maxiter = EM_iter, tol = EM_tol)
+		n = Q.shape[0]
+
+		# calculate the 95% intervals
+		alpha = .95
+		low_ix, high_ix = np.int(((1-alpha)/2)*bootstraps), np.int((alpha+(1-alpha)/2)*bootstraps)
+
+		# fill results matrix
+		shared_resMatrix[w,0] = locus # index of first locus
+		shared_resMatrix[w,1] = non_missing # index of first locus
+		shared_resMatrix[w,2] = niter # count non_missing
+		shared_resMatrix[w,3] = LL # loglike
+		# fill out the maf
+		for pop in xrange(npops):
+			shared_resMatrix[w, 4+3*pop] = maf_em[pop]
+
+		if bootstraps > 0:
+			res_bootstrap = np.zeros((bootstraps, npops))
+			for i in xrange(bootstraps):
+				maf = np.array([0.5, 0.5])
+				gr, qr = bootstrap_resample(codes, Q,  genos_resample, Q_resample, n)
+				maf_em_bs, niter_bs, LL_bs = emFreqAdmix(gr, qr, maf, maxiter = EM_iter, tol = EM_tol)
+				for pop in xrange(npops):
+					res_bootstrap[i, pop] = maf_em_bs[pop]
+			for pop in xrange(npops):
+				shared_resMatrix[w, 5+3*pop] = np.sort(res_bootstrap[:,pop])[low_ix] # low
+				shared_resMatrix[w, 6+3*pop] = np.sort(res_bootstrap[:,pop])[high_ix] # high
+		w +=1
+
 
 
 @optional_numba_decorator
@@ -252,3 +342,113 @@ def get_sumstats_from_haplotype_freqs(H):
 	Dprime = D/Dmax
 	r2 = (D**2)/(pA*pB*pa*pb)
 	return(r2, D, Dprime, pA, pB)
+
+@optional_numba_decorator
+def fix(H, decimals):
+	"""rounds to a certain number of decimals and then norms to sum to 1"""
+	Hround = np.round(H, decimals = decimals)
+	return Hround / Hround.sum(1)[:, None]
+
+@optional_numba_decorator
+def find_boundaries(hrow, zero_threshold ):
+	"""give a set of four haplotype frequencies (a row of H), return the possible egde case or None"""
+	near_zero = hrow < zero_threshold
+	count_near_zero = near_zero.sum()
+	if count_near_zero == 3:
+		return (np.rint(hrow)) # round to nearest integers
+	elif count_near_zero == 2:
+		p1 = hrow[2] + hrow[3]
+		p2 = hrow[1] + hrow[3]
+		if (p1 < zero_threshold):
+			hrow[0] = hrow[0] / (hrow[0] + hrow[1])
+			hrow[1] = hrow[1] / (hrow[0] + hrow[1])
+			hrow[2] = 0
+			hrow[3] = 0
+			return(hrow)
+		elif (p1 > (1.0-zero_threshold)):
+			hrow[0] = 0
+			hrow[1] = 0
+			hrow[2] = hrow[2] / (hrow[2] + hrow[3])
+			hrow[3] = hrow[3] / (hrow[2] + hrow[3])
+			return(hrow)
+		elif (p2 < zero_threshold):
+			hrow[0] = hrow[0] / (hrow[0] + hrow[2])
+			hrow[1] = 0
+			hrow[2] = hrow[2] / (hrow[0] + hrow[2])
+			hrow[3] = 0
+			return(hrow)
+		elif (p2 > (1.0- zero_threshold)):
+			hrow[0] = 0
+			hrow[1] = hrow[1] / (hrow[1] + hrow[3])
+			hrow[2] = 0
+			hrow[3] = hrow[3] / (hrow[1] + hrow[3])
+			return(hrow)
+	else:
+		return (None)
+
+@optional_numba_decorator
+def check_boundaries(H, Q, LL, codes, zero_threshold):
+	# boundaries within one pop
+	# Hap00	Hap01	Hap10	Hap11
+	# [0, 0, 0, 1], [0, 0, 1, 0], [0, 1, 0, 0], [1, 0, 0, 0] # fixed haplotype # both alleles fixed
+	# [0, 0, x, 1-x], [0, x, 0, 1-x], [ x, 1-x, 0, 0], [x, 0, 1-x, 0] # fixed allele
+
+	FLAG = np.zeros(len(H)) # FLAG 0 = good, 1 = fixed hap, 2 = fixed allele
+	bestH = H.copy()
+	bestLL = LL
+
+	for i in xrange(len(H)):
+		htest = find_boundaries(H[i], zero_threshold=zero_threshold)
+		if htest is not None:
+			H[i] = htest
+			FLAG[i] = 1
+	test_ll = get_LL_numba(Q = Q, H = H, code = codes)
+	if test_ll >= bestLL:
+		bestLL = test_ll
+		bestH = H
+	else:
+		FLAG = np.zeros(len(H))
+	return(FLAG, bestLL, bestH)
+
+
+# will need to deal with missing data - either before or after bootstrapping
+@jit(nopython=True)
+def emFreqAdmix(genos, Q, maf, maxiter = 200, tol = 1e-6):
+	""" returns an EM estimate of MAF within each admixture component
+	"""
+	old_LL = ll_FreqAdmix(genos, Q, maf)
+	for i in xrange(1, maxiter+1): # iterations
+		for k in xrange(Q.shape[1]):
+			aNorm = np.dot(Q, maf) # individual allele frequencies
+			bNorm = np.dot(Q, 1.0-maf)
+			ag = genos * Q[:,k] * maf[k]/aNorm
+			bg = (2-genos) * Q[:,k] * (1.0-maf[k])/bNorm
+			fnew = np.sum( ag )/np.sum(ag +bg )
+			maf[k] = fnew
+
+		new_LL = ll_FreqAdmix(genos, Q, maf)
+		delta_LL = new_LL - old_LL
+		if delta_LL <= tol:
+			break
+		old_LL = new_LL
+	return(maf, i , new_LL)
+
+@jit(nopython=True)
+def ll_FreqAdmix(genos, Q, maf):
+	"""returns the loglikelihood of the genotype data given Q and maf"""
+	iaf = np.dot(Q, maf) # individual allele frequencies
+	return np.log(((1-iaf[genos==0])**2)).sum() + np.log(2*(1-iaf[genos==1])*iaf[genos==1]).sum() + np.log(((iaf[genos==2])**2)).sum()
+
+
+@jit(nopython=True)
+def bootstrap_resample(genos, Q,  genos_resample, Q_resample, n):
+    assert(len(genos) == len(Q))
+    if n == 0:
+        n = len(genos)
+    # resample indexes
+    resample_ix =  np.rint(np.floor(np.random.rand(n)*len(genos)))
+
+    for i in xrange(n):
+        genos_resample[i] = genos[int(resample_ix[i])]
+        Q_resample[i] = Q[int(resample_ix[i])]
+    return(genos_resample, Q_resample)
