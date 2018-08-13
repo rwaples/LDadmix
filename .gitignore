@@ -1,7 +1,13 @@
 /scratch/*
 !/scratch/.gitkeep
+/.pytest_cache/
+/ancLD/__pycache__/*
+/ancLD/tests.py
+/tests/*
 
+*.lprof
 *.ipynb
 *.pyc
 *.py~
 *.log
+*.dat

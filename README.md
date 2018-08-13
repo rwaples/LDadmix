@@ -9,7 +9,8 @@ python ancLD.py --help
 ```
 
 ## requirements
-python 2.7+
+python 2.7+ or python 3.6+
+
 ### python packages
  - numpy
  - pandas
@@ -38,6 +39,6 @@ Output files can get large.
  - Hap11 : frequency of the 1_1 haplotype
  - r2 : r^2 value, based on the haplotype frequencies
  - D : D value, based on the haplotype frequencies
- - Dprime : D' value, based on the haplotype frequencies
+ - Dprime : D' value, based on the haplotype frequencies = [abs(D/Dmax)]
  - p1 : allele frequency at locus1, based on the haplotype frequencies
  - p2 : allele frequency at locus2, based on the haplotype frequencies

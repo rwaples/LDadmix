@@ -1,68 +1,86 @@
+from __future__ import absolute_import, division, print_function
+from builtins import (ascii, bytes, chr, dict, filter, hex, input,
+                      int, map, next, oct, open, pow, range, round,
+                      str, super, zip)# http://python-future.org/imports.html
+
 import multiprocessing
 import itertools
 import ctypes
 
 import numpy as np
 from plinkio import plinkfile
-#import pandas as pd
 
-#NUMBA_DISABLE_JIT = 0
-NUMBA = False
-RESOLVE_EDGE_CASES = 1
+
+# my settings
+RESOLVE_EDGE_CASES = True
+CACHE_JIT = True
+
+
+_numba_available = True
 
 try:
 	from numba import jit
-	NUMBA = True
 	print("------------------")
 	print("Numba import successful")
 	print("------------------\n")
 except ImportError:
+	_numba_available = False
 	print("------------------")
 	print("Import of numba failed, analysis will run significantly slower")
 	print("------------------\n")
-# decorator depending on numba, if numba is found, will decorate with: jit(nopython=True)
+
+# decorator depending on numba, if numba is found, will decorate with: jit(...)
 def optional_numba_decorator(func):
-	if NUMBA:
-		#return(jit(nopython=True)(func))
+	if _numba_available:
+		# not sure how to specify nogil: False or True?
+		# maybe break into one for each
 		return(jit(nopython=True, nogil=False, cache=False)(func))
 	else:
 		return(func)
-
 
 def load_plinkfile(basepath):
 	plink_file = plinkfile.open(basepath)
 	sample_list = plink_file.get_samples()
 	locus_list = plink_file.get_loci()
-	my_array = np.zeros((len(plink_file.get_loci( )), len(plink_file.get_samples( ))))
+	my_array = np.zeros((len(locus_list), len(sample_list)))
 	for i, el in enumerate(plink_file):
 		my_array[i] = el
 	# look for missing data
 	has_missing = False
 	if 3 in np.unique(my_array):
 		has_missing = True
-		# replace missing values with nines - this will cause them to never match during genotype code checking
+		# replace missing values with 9
+		# this will cause them to never match during genotype code checking
 		my_array[my_array == 3] = 9
 
 	my_array = my_array.astype('i1')
+	plink_file.close()
 	return(sample_list, locus_list, my_array, has_missing)
 
-
+#@optional_numba_decorator
+# pos can be a vector of float or int posistions, as can the maxdist
+@jit(nopython=True, nogil=False, cache=False)
 def find_idxpairs_maxdist_generator(pos, maxdist):
-	"""iterator, yields tuples of indexes for all pairs of loci within maxdist
+	"""iterator, yields indexes for all pairs of loci within maxdist,
+	needs to be grouped into pairs
 	pos : positions of loci
 	maxdist : maximum distance apart"""
-	for siteix, sitepos in enumerate(pos):
-		if np.allclose(maxdist, 0):
+	siteix = 0
+	for sitepos in pos:
+		if maxdist == 0:
 			leftix = 0
 		else:
-			leftix = np.searchsorted(pos, sitepos - maxdist) # index of the leftmost locus position with maxdist
-		for altix in xrange(leftix, siteix):
+			leftix = np.searchsorted(pos, sitepos - maxdist) # index of the leftmost locus position within maxdist
+		for altix in range(leftix, siteix):
 			#yield ((altix, siteix))
 			yield altix
 			yield siteix
+		siteix += 1
 
 
-@optional_numba_decorator
+#@optional_numba_decorator
+#@jit("float64[:,:](int32, int32)", nopython=True, nogil=False, cache=True)
+@jit(nopython=True, nogil=False, cache=CACHE_JIT)
 def get_rand_hap_freqs(n=2, seed = 0):
 	"""returns an (n,4) dimensioned numpy array of random haplotype frequencies,
 	where n is the number of pops"""
@@ -70,20 +88,16 @@ def get_rand_hap_freqs(n=2, seed = 0):
 		np.random.seed(seed)
 	else:
 		pass
-	H = np.zeros((n, 4))
-	for i in xrange(n):
+	H = np.zeros((n, 4), dtype = np.float64)
+	for i in range(n):
 		H[i] = np.diff(np.concatenate((np.array([0]), np.sort(np.random.rand(3)), np.array([1.0]))))
 	return(H)
 
 
-@optional_numba_decorator
-def get_geno_codes(genos):
-	"""maps each pair of non-missing genotypes into an integer from 0 to 8
-	pairs with missing genotypes will map above 8"""
-	return(genos[0] + 3*genos[1])
 
 
-@optional_numba_decorator
+
+@jit(nopython=True, nogil=False, cache=CACHE_JIT)
 def get_LL_numba(Q, H, code):
 	"""returns the loglikelihood of the genotype data given Q and H
 	Q = admixture fractions
@@ -108,27 +122,30 @@ def get_LL_numba(Q, H, code):
 # try G as a global
 #G = np.array([0,3,1,4, 3,6,4,7, 1,4,2,5, 4,7,5,8])
 
-@optional_numba_decorator
+@jit(nopython=True, nogil=False, cache=CACHE_JIT)
 def do_multiEM(inputs):
 	""""""
 	H, Q, code, max_iter, tol = inputs # unpack the input
 
 	n_ind = Q.shape[0]
 	n_pops = Q.shape[1]
-	G = np.array([0,3,1,4, 3,6,4,7, 1,4,2,5, 4,7,5,8]) # which combinations of haplotypes produce which genotypes
+
+	# which combinations of haplotypes produce which genotypes
+	# genotypes with missing values will not be found
+	G = np.array([0,3,1,4, 3,6,4,7, 1,4,2,5, 4,7,5,8])
 
 	old_LL = get_LL_numba(Q = Q, H = H , code = code)
 
 	# start iteration here
-	for i in xrange(1, max_iter+1):
+	for i in range(1, max_iter+1):
 		norm = np.zeros(n_ind) # maybe just change this to a matrix of ones - then set to zero if data is found to be non-missing
 		isum = np.zeros((n_ind, n_pops, 4)) # hold sums over the 4 haplotypes from each pop in each ind
-		for hap1 in xrange(4):								# index of haplotype in first spot
-			for hap2 in xrange(4):							# index of haplotype in second spot
+		for hap1 in range(4):								# index of haplotype in first spot
+			for hap2 in range(4):							# index of haplotype in second spot
 				for ind, icode in enumerate(code):   # individuals
 					if icode == G[4 * hap1 + hap2]:   # if the current pair of haplotypes is consistent with the given genotype
-						for z1 in xrange(n_pops):					 # source pop of hap1
-							for z2 in xrange(n_pops):				 # source pop of hap2
+						for z1 in range(n_pops):					 # source pop of hap1
+							for z2 in range(n_pops):				 # source pop of hap2
 								raw = Q[ind, z1] * H[z1, hap1] * Q[ind, z2] * H[z2, hap2]
 								isum[ind, z1, hap1] += raw
 								isum[ind, z2, hap2] += raw
@@ -136,30 +153,20 @@ def do_multiEM(inputs):
 		norm[norm == 0] = 1 # avoid the division by zero due to missing data
 		# normalized sum over individuals
 		post = np.zeros((n_pops, 4))
-		for ind in xrange(n_ind):
-			for z in xrange(n_pops):
-				for hap in xrange(4):
+		for ind in range(n_ind):
+			for z in range(n_pops):
+				for hap in range(4):
 					#update post for each hap in each pop
 					post[z, hap] += isum[ind, z, hap]/norm[ind] #  can we use this estimate an 'effective sample size?'
 
 		# scale the sums so they sum to one  - now represents the haplotype frequencies within pops
 		H = np.zeros((n_pops, 4))
-		for z in xrange(n_pops):
+		for z in range(n_pops):
 			H[z] = post[z]/np.sum(post[z])
 
-		#for h in H:
-		#	for j in h:
-		#		print(j)
-
+		# check to end
 		new_LL = get_LL_numba(Q = Q, H = H , code = code)
 		delta_LL = new_LL - old_LL
-
-		#if not (delta_LL >= 0):
-		#	if (np.abs(delta_LL/old_LL) < 1e-6):
-		#		break
-		#	else:
-		#		assert False, 'delta error'
-
 		if delta_LL <= tol:
 			break
 		old_LL = new_LL
@@ -168,11 +175,11 @@ def do_multiEM(inputs):
 
 
 #@jit(#"void(int32[:, :], i1[:, :], f8[:, :], f8[:, :], i2, f8, i8, i8[:])",
-@optional_numba_decorator
+@jit(nopython=True, nogil=True, cache=CACHE_JIT)
 def multiprocess_EM_inner(pairs_inner, shared_genoMatrix, shared_resMatrix, Q, EM_iter, EM_tol, start_idx, seeds):
 	npops = Q.shape[1]
 	w = start_idx #  used to index the results matrix
-	for i in xrange(len(pairs_inner)):
+	for i in range(len(pairs_inner)):
 		pair = pairs_inner[i]
 		seed = seeds[i]
 		# get genotype codes
@@ -198,13 +205,13 @@ def multiprocess_EM_inner(pairs_inner, shared_genoMatrix, shared_resMatrix, Q, E
 		shared_resMatrix[w,4] = res_EM[2] # n_iter
 
 		# fill out the flags
-		for ix in xrange(npops):
+		for ix in range(npops):
 			shared_resMatrix[w, 5+ix] = flags[ix]
 
 		# fill out the haplotype frequencies
 		ix = 0
-		for pop in xrange(npops):
-			for hap in xrange(4):
+		for pop in range(npops):
+			for hap in range(4):
 				shared_resMatrix[w, 5+npops+ix] = H[pop, hap]
 				ix+=1
 		w +=1
@@ -216,7 +223,7 @@ def multiprocess_EM_outer(pairs_outer, shared_genoMatrix, Q, cpus, EM_iter, EM_t
 	# spread the pairs across cpus
 	len_pairs = len(pairs_outer)
 	per_thread = int(np.ceil(len_pairs/float(cpus)))
-	ix_starts = itertools.chain([i * per_thread for i in xrange(cpus)])
+	ix_starts = itertools.chain([i * per_thread for i in range(cpus)])
 
 	# split across processes
 	jobs = np.split(pairs_outer, np.arange(per_thread, len_pairs, per_thread))
@@ -248,7 +255,7 @@ def multiprocess_onelocusEM_outer(genos_outer, shared_genoMatrix, Q, cpus, EM_it
 	# spread the pairs across cpus
 	len_genos = len(genos_outer)
 	per_thread = int(np.ceil(len_genos/float(cpus)))
-	ix_starts = itertools.chain([i * per_thread for i in xrange(cpus)])
+	ix_starts = itertools.chain([i * per_thread for i in range(cpus)])
 
 	# split across processes
 	jobs = np.split(genos_outer, np.arange(per_thread, len_genos, per_thread))
@@ -259,8 +266,8 @@ def multiprocess_onelocusEM_outer(genos_outer, shared_genoMatrix, Q, cpus, EM_it
 	res = np.zeros((len(genos_outer), res_dim2), dtype = 'f8')
 	sharedArray = multiprocessing.Array(ctypes.c_double, res.flatten(), lock = None)
 	shared_resMatrix = np.frombuffer(sharedArray.get_obj(), dtype='f8').reshape(res.shape)
-	print "size of res matrix:"
-	print shared_resMatrix.shape
+	print ("size of res matrix:")
+	print (shared_resMatrix.shape)
 	del res
 
 	n = Q.shape[0]
@@ -282,7 +289,7 @@ def multiprocess_onelocusEM_outer(genos_outer, shared_genoMatrix, Q, cpus, EM_it
 def multiprocess_onelocusEM_inner(genos_inner, shared_genoMatrix, shared_resMatrix, Q, EM_iter, EM_tol, start_idx, seeds, bootstraps, genos_resample, Q_resample):
 	npops = Q.shape[1]
 	w = start_idx #  used to index the results matrix
-	for i in xrange(len(genos_inner)):
+	for i in range(len(genos_inner)):
 		locus = genos_inner[i]
 		seed = seeds[i]
 		# get genotype codes
@@ -303,27 +310,28 @@ def multiprocess_onelocusEM_inner(genos_inner, shared_genoMatrix, shared_resMatr
 		shared_resMatrix[w,2] = niter # count non_missing
 		shared_resMatrix[w,3] = LL # loglike
 		# fill out the maf
-		for pop in xrange(npops):
+		for pop in range(npops):
 			shared_resMatrix[w, 4+3*pop] = maf_em[pop]
 
 		if bootstraps > 0:
 			res_bootstrap = np.zeros((bootstraps, npops))
-			for i in xrange(bootstraps):
+			for i in range(bootstraps):
 				maf = np.array([0.5, 0.5])
 				gr, qr = bootstrap_resample(codes, Q,  genos_resample, Q_resample, n)
 				maf_em_bs, niter_bs, LL_bs = emFreqAdmix(gr, qr, maf, maxiter = EM_iter, tol = EM_tol)
-				for pop in xrange(npops):
+				for pop in range(npops):
 					res_bootstrap[i, pop] = maf_em_bs[pop]
-			for pop in xrange(npops):
+			for pop in range(npops):
 				shared_resMatrix[w, 5+3*pop] = np.sort(res_bootstrap[:,pop])[low_ix] # low
 				shared_resMatrix[w, 6+3*pop] = np.sort(res_bootstrap[:,pop])[high_ix] # high
 		w +=1
 
 
 
-@optional_numba_decorator
+@jit(nopython=True, nogil=False, cache=CACHE_JIT)
 def get_sumstats_from_haplotype_freqs(H):
-	"""given a set of four haplotype frequencies x populations, returns r^2, D, Dprime, and allele frequencies in each pop"""
+	"""given a set of four haplotype frequencies x populations,
+	returns r^2, D, Dprime, and allele frequencies in each pop"""
 	# 00, 01, 10, 11
 	pA = H[:,2] + H[:,3]
 	pB = H[:,1] + H[:,3]
@@ -339,19 +347,20 @@ def get_sumstats_from_haplotype_freqs(H):
 	A = np.minimum(pApb, papB) # Dmax when D is positive
 	B = np.minimum(pApB, papb) # Dmax when D is negative
 	Dmax = np.where(D >= 0, A, B)
-	Dprime = D/Dmax
+	Dprime = np.abs(D/Dmax) # now an absolute value
 	r2 = (D**2)/(pA*pB*pa*pb)
 	return(r2, D, Dprime, pA, pB)
 
-@optional_numba_decorator
+@jit(nopython=True, nogil=False, cache=CACHE_JIT)
 def fix(H, decimals):
 	"""rounds to a certain number of decimals and then norms to sum to 1"""
 	Hround = np.round(H, decimals = decimals)
 	return Hround / Hround.sum(1)[:, None]
 
-@optional_numba_decorator
+@jit(nopython=True, nogil=False, cache=CACHE_JIT)
 def find_boundaries(hrow, zero_threshold ):
-	"""give a set of four haplotype frequencies (a row of H), return the possible egde case or None"""
+	"""give a set of four haplotype frequencies (a row of H),
+	return the possible egde case or None"""
 	near_zero = hrow < zero_threshold
 	count_near_zero = near_zero.sum()
 	if count_near_zero == 3:
@@ -386,7 +395,7 @@ def find_boundaries(hrow, zero_threshold ):
 	else:
 		return (None)
 
-@optional_numba_decorator
+@jit(nopython=True, nogil=False, cache=CACHE_JIT)
 def check_boundaries(H, Q, LL, codes, zero_threshold):
 	# boundaries within one pop
 	# Hap00	Hap01	Hap10	Hap11
@@ -397,7 +406,7 @@ def check_boundaries(H, Q, LL, codes, zero_threshold):
 	bestH = H.copy()
 	bestLL = LL
 
-	for i in xrange(len(H)):
+	for i in range(len(H)):
 		htest = find_boundaries(H[i], zero_threshold=zero_threshold)
 		if htest is not None:
 			H[i] = htest
@@ -417,8 +426,8 @@ def emFreqAdmix(genos, Q, maf, maxiter = 200, tol = 1e-6):
 	""" returns an EM estimate of MAF within each admixture component
 	"""
 	old_LL = ll_FreqAdmix(genos, Q, maf)
-	for i in xrange(1, maxiter+1): # iterations
-		for k in xrange(Q.shape[1]):
+	for i in range(1, maxiter+1): # iterations
+		for k in range(Q.shape[1]):
 			aNorm = np.dot(Q, maf) # individual allele frequencies
 			bNorm = np.dot(Q, 1.0-maf)
 			ag = genos * Q[:,k] * maf[k]/aNorm
@@ -448,7 +457,34 @@ def bootstrap_resample(genos, Q,  genos_resample, Q_resample, n):
     # resample indexes
     resample_ix =  np.rint(np.floor(np.random.rand(n)*len(genos)))
 
-    for i in xrange(n):
+    for i in range(n):
         genos_resample[i] = genos[int(resample_ix[i])]
         Q_resample[i] = Q[int(resample_ix[i])]
     return(genos_resample, Q_resample)
+
+
+def df2csv(df, fname, formats, mode):
+	"""adapted from https://stackoverflow.com/q/15417574"""
+	sep = '\t'
+	Nd = len(df.columns)
+	Nd_1 = Nd - 1
+	with open(fname, mode) as OUTFILE:
+		if mode == 'w':
+			OUTFILE.write(sep.join(df.columns) + '\n')
+		for row in df.itertuples(index=False):
+			ss = ''
+			for ii in range(Nd):
+				ss += formats[ii] % row[ii]
+				if ii < Nd_1:
+					ss += sep
+			OUTFILE.write(ss+'\n')
+
+
+
+#@optional_numba_decorator
+#@jit("int8[:](int8[:,:])", nopython=True, nogil=False, cache=True)
+def get_geno_codes(genos):
+	### NO longer used
+	"""maps each pair of non-missing genotypes into an integer from 0 to 8
+	pairs with missing genotypes will map above 8"""
+	return(genos[0] + 3*genos[1])
