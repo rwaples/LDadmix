@@ -24,13 +24,13 @@ Tab-delimited text file, one line per pair of loci per population.
 Output will be gzipped (\*.gz) with the -Z flag.  
 Output files can get large.
 
- - i1, i2 : index of locus[1/2] within chromosome
+ - i1, i2 : index of locus[1/2] within chromosome (zero-indexed)
  - locus1, locus2 : name of locus[1/2], taken from the .bim file
  - CHR : chromosome
  - bp_dist : basepair distance between the locus1 and locus2
  - genetic_dist : genetic distance between the locus1 and locus2
  - non_missing : the number of individuals with non-missing genotypes
- - pop : population (based on position in Q file)
+ - pop : population (based on position in Q file) (one-indexed)
  - iter : number of EM iterations
  - logLike : (log)likelihood of the data at the termination of the EM
  - Hap00 : frequency of the 0_0 haplotype

@@ -8,7 +8,8 @@ import itertools
 import ctypes
 
 import numpy as np
-from plinkio import plinkfile
+#from plinkio import plinkfile
+import pandas_plink
 
 
 # my settings
@@ -39,12 +40,15 @@ def optional_numba_decorator(func):
 		return(func)
 
 def load_plinkfile(basepath):
+	"to be replaced"
 	plink_file = plinkfile.open(basepath)
 	sample_list = plink_file.get_samples()
 	locus_list = plink_file.get_loci()
-	my_array = np.zeros((len(locus_list), len(sample_list)))
-	for i, el in enumerate(plink_file):
-		my_array[i] = el
+	#my_array = np.zeros((len(locus_list), len(sample_list)))
+	#for i, el in enumerate(plink_file):
+	#	my_array[i] = el
+	my_array = np.array([sa for sa in plink_file], dtype='i1')
+
 	# look for missing data
 	has_missing = False
 	if 3 in np.unique(my_array):
@@ -56,6 +60,16 @@ def load_plinkfile(basepath):
 	my_array = my_array.astype('i1')
 	plink_file.close()
 	return(sample_list, locus_list, my_array, has_missing)
+
+def read_plink_pandas(basepath):
+    (bim, fam, G) = pandas_plink.read_plink(basepath, verbose = False)
+    # G is a dask array
+    Gp = np.array(G.compute()) # turn the Dask array into a numpy array
+    Gp[np.isnan(Gp)] = 9 # use 9 for missing values, rather than nan
+    Gp = Gp.astype('i1')
+    return(fam, bim, Gp, (Gp>8).any())
+
+
 
 #@optional_numba_decorator
 # pos can be a vector of float or int posistions, as can the maxdist
@@ -179,11 +193,11 @@ def do_multiEM(inputs):
 def multiprocess_EM_inner(pairs_inner, shared_genoMatrix, shared_resMatrix, Q, EM_iter, EM_tol, start_idx, seeds):
 	npops = Q.shape[1]
 	w = start_idx #  used to index the results matrix
+
 	for i in range(len(pairs_inner)):
 		pair = pairs_inner[i]
 		seed = seeds[i]
 		# get genotype codes
-
 		codes = shared_genoMatrix[pair[0]] + 3*shared_genoMatrix[pair[1]]
 
 		H = get_rand_hap_freqs(n = npops, seed = seed)
@@ -285,6 +299,29 @@ def multiprocess_onelocusEM_outer(genos_outer, shared_genoMatrix, Q, cpus, EM_it
 
 	return(shared_resMatrix)
 
+def multiprocess_EM_profile(pairs_outer, shared_genoMatrix, Q, cpus, EM_iter, EM_tol, seeds):
+
+	# spread the pairs across cpus
+	len_pairs = len(pairs_outer)
+	per_thread = int(np.ceil(len_pairs/float(cpus)))
+	ix_starts = itertools.chain([i * per_thread for i in range(cpus)])
+
+	# split across processes
+	jobs = np.split(pairs_outer, np.arange(per_thread, len_pairs, per_thread))
+	assert len(jobs) == 1
+	job = np.array(jobs[0], dtype='i8')
+	# make a shared results array
+	npops = Q.shape[1]
+	res_dim2 = 5 + 5*npops # loc1, loc2, count_non_missing, logL, iters, [flags],[hap freqs]
+	res = np.zeros((len(pairs_outer), res_dim2), dtype = 'f8')
+	sharedArray = multiprocessing.Array(ctypes.c_double, res.flatten(), lock = None)
+	shared_resMatrix = np.frombuffer(sharedArray.get_obj(), dtype='f8').reshape(res.shape)
+	del res
+	multiprocess_EM_inner(job, shared_genoMatrix, shared_resMatrix,
+			Q, EM_iter, EM_tol, next(ix_starts), seeds)
+	return(shared_resMatrix)
+
+
 @jit(nopython=True)
 def multiprocess_onelocusEM_inner(genos_inner, shared_genoMatrix, shared_resMatrix, Q, EM_iter, EM_tol, start_idx, seeds, bootstraps, genos_resample, Q_resample):
 	npops = Q.shape[1]
@@ -294,15 +331,15 @@ def multiprocess_onelocusEM_inner(genos_inner, shared_genoMatrix, shared_resMatr
 		seed = seeds[i]
 		# get genotype codes
 		codes = shared_genoMatrix[locus]
-		non_missing = len(codes[codes<=2])
+		# exclude the missing genotypes
+		codes = codes[codes<=2]
+		non_missing = len(codes)
 		# do the EM
 		maf = np.array([0.5, 0.5])
 		maf_em, niter, LL = emFreqAdmix(codes, Q, maf, maxiter = EM_iter, tol = EM_tol)
 		n = Q.shape[0]
 
-		# calculate the 95% intervals
-		alpha = .95
-		low_ix, high_ix = np.int(((1-alpha)/2)*bootstraps), np.int((alpha+(1-alpha)/2)*bootstraps)
+
 
 		# fill results matrix
 		shared_resMatrix[w,0] = locus # index of first locus
@@ -314,6 +351,10 @@ def multiprocess_onelocusEM_inner(genos_inner, shared_genoMatrix, shared_resMatr
 			shared_resMatrix[w, 4+3*pop] = maf_em[pop]
 
 		if bootstraps > 0:
+			# calculate the 95% intervals
+			alpha = .95
+			low_ix, high_ix = np.int(((1-alpha)/2)*bootstraps), np.int((alpha+(1-alpha)/2)*bootstraps)
+
 			res_bootstrap = np.zeros((bootstraps, npops))
 			for i in range(bootstraps):
 				maf = np.array([0.5, 0.5])
@@ -324,6 +365,10 @@ def multiprocess_onelocusEM_inner(genos_inner, shared_genoMatrix, shared_resMatr
 			for pop in range(npops):
 				shared_resMatrix[w, 5+3*pop] = np.sort(res_bootstrap[:,pop])[low_ix] # low
 				shared_resMatrix[w, 6+3*pop] = np.sort(res_bootstrap[:,pop])[high_ix] # high
+		else:
+			for pop in range(npops):
+				shared_resMatrix[w, 5+3*pop] = np.nan
+				shared_resMatrix[w, 6+3*pop] = np.nan # high
 		w +=1
 
 
@@ -445,22 +490,26 @@ def emFreqAdmix(genos, Q, maf, maxiter = 200, tol = 1e-6):
 @jit(nopython=True)
 def ll_FreqAdmix(genos, Q, maf):
 	"""returns the loglikelihood of the genotype data given Q and maf"""
-	iaf = np.dot(Q, maf) # individual allele frequencies
-	return np.log(((1-iaf[genos==0])**2)).sum() + np.log(2*(1-iaf[genos==1])*iaf[genos==1]).sum() + np.log(((iaf[genos==2])**2)).sum()
+	# individual allele frequencies
+	iaf = np.dot(Q, maf)
+	return(np.log(((1-iaf[genos==0])**2)).sum() +
+		np.log(2*(1-iaf[genos==1])*iaf[genos==1]).sum() +
+		np.log(((iaf[genos==2])**2)).sum())
 
 
 @jit(nopython=True)
 def bootstrap_resample(genos, Q,  genos_resample, Q_resample, n):
-    assert(len(genos) == len(Q))
-    if n == 0:
-        n = len(genos)
-    # resample indexes
-    resample_ix =  np.rint(np.floor(np.random.rand(n)*len(genos)))
+	"bootstrap resampling of (genotypes, Q values)"
+	assert(len(genos) == len(Q))
+	if n == 0:
+		n = len(genos)
+		# resample indexes
+	resample_ix =  np.rint(np.floor(np.random.rand(n)*n))
 
-    for i in range(n):
-        genos_resample[i] = genos[int(resample_ix[i])]
-        Q_resample[i] = Q[int(resample_ix[i])]
-    return(genos_resample, Q_resample)
+	for i in range(n):
+		genos_resample[i] = genos[int(resample_ix[i])]
+		Q_resample[i] = Q[int(resample_ix[i])]
+	return(genos_resample, Q_resample)
 
 
 def df2csv(df, fname, formats, mode):
@@ -469,6 +518,7 @@ def df2csv(df, fname, formats, mode):
 	Nd = len(df.columns)
 	Nd_1 = Nd - 1
 	with open(fname, mode) as OUTFILE:
+		# only write heading if clobbering file
 		if mode == 'w':
 			OUTFILE.write(sep.join(df.columns) + '\n')
 		for row in df.itertuples(index=False):
