@@ -2,6 +2,7 @@ from __future__ import absolute_import, division, print_function
 from builtins import (ascii, bytes, chr, dict, filter, hex, input,
                       int, map, next, oct, open, pow, range, round,
                       str, super, zip)# http://python-future.org/imports.html
+
 #base
 import argparse
 import multiprocessing
@@ -114,6 +115,7 @@ args = parser.parse_args()
 ## Profiling
 PROFILE = False
 if args.profile:
+	print("Profiling Enabled")
 	PROFILE = True
 	import data_profiler as profiler
 	import pstats
@@ -381,6 +383,8 @@ if not args.F:
 
 if args.F:
 	print("Doing single locus analysis!")
+	n_bootstraps = 0
+
 	FIRST = True
 
 	array_dim = geno_array.shape
@@ -388,14 +392,18 @@ if args.F:
 	shared_geno_matrix = np.frombuffer(shared_geno_array.get_obj(), dtype='i1').reshape(array_dim)
 	del geno_array
 
+	# I could enfore the locus limit here
+
 	batches = np.split(range(data_nloci), np.arange(BATCH_SIZE, data_nloci, BATCH_SIZE))
 	print("There will be {} output batch(es) with up to {:,} loci each".format(len(batches), BATCH_SIZE))
 	for count, batch in enumerate(batches, start = 1): # now start batch numbers at 1
 		print("\tStarting batch {}".format(count))
 
 		t1 = time.time()
-		batch_EM_res = LDadmix.multiprocess_onelocusEM_outer(genos_outer=batch, shared_genoMatrix=shared_geno_matrix, Q=shared_q_matrix, cpus=THREADS,
-			EM_iter = EM_ITER_LIMIT, EM_tol = EM_TOL, seeds = shared_seeds_np, bootstraps = 100)
+		batch_EM_res = LDadmix.multiprocess_onelocusEM_outer(batch_indexes=batch,
+			shared_genoMatrix=shared_geno_matrix, Q=shared_q_matrix, cpus=THREADS,
+			EM_iter = EM_ITER_LIMIT, EM_tol = EM_TOL, seeds = shared_seeds_np,
+			bootstraps = n_bootstraps)
 		print ("size of batch_EM_res:")
 		print (batch_EM_res.shape)
 
@@ -403,11 +411,11 @@ if args.F:
 		print ("\t\tfinished in {:.6} seconds, writing to disk".format(t2-t1))
 
 		# locus, non_missing, niter, LL [maf, ci_low, ci_high] in each pop
-		formats = ['%9i', '%9i','%9i', '%1.8f'] + ['%1.3f', '%1.3f', '%1.3f']*NPOPS
+		formats = ['%9i',  '%9i','%9i','%9i', '%1.8f'] + ['%1.3f', '%1.3f', '%1.3f']*NPOPS
 		batch_EM_df = pd.DataFrame(batch_EM_res)
 		popnums  = [pop+1 for pop in range(NPOPS) ]
 		popheaders = [['pop{}_maf'.format(pop), 'pop{}_ci_lower'.format(pop), 'pop{}_ci_upper'.format(pop)] for pop in popnums]
-		batch_EM_df.columns = ['locus', 'non_missing', 'niter', 'LL'] + sum(popheaders, [])
+		batch_EM_df.columns = ['locus', 'non_missing', 'allele_count', 'niter', 'LL'] + sum(popheaders, [])
 		if FIRST:
 			mode = 'w'
 		else:
