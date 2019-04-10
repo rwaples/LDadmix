@@ -9,7 +9,7 @@ python ancLD.py --help
 ```
 
 ## requirements
-works with python 2.7+ or python 3.6+
+works with Python 3.6+
 
 ### python packages
  - numpy
