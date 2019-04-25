@@ -3,7 +3,7 @@ Estimate the haplotype frequencies and LD in the ancestral populations of admixe
 
 ### usage
 ```
-git clone https://github.com/rwaples/ancLD.git
+git clone https://github.com/rwaples/LDadmix.git
 cd ancLD/ancLD
 python ancLD.py --help
 ```
