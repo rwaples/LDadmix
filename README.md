@@ -1,4 +1,4 @@
-# ancLD
+# LDadmix
 Estimate the haplotype frequencies and LD in the ancestral populations of admixed samples.
 
 ### usage
