@@ -1,15 +1,15 @@
-# ancLD
+# LDadmix
 Estimate the haplotype frequencies and LD in the ancestral populations of admixed samples.
 
 ### usage
 ```
-git clone https://github.com/rwaples/ancLD.git
+git clone https://github.com/rwaples/LDadmix.git
 cd ancLD/ancLD
 python ancLD.py --help
 ```
 
 ## requirements
-works with python 2.7+ or python 3.6+
+works with Python 3.6+
 
 ### python packages
  - numpy
