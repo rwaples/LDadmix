@@ -1,7 +1,7 @@
 from __future__ import absolute_import, division, print_function
 from builtins import (ascii, bytes, chr, dict, filter, hex, input,
                       int, map, next, oct, open, pow, range, round,
-                      str, super, zip)# http://python-future.org/imports.html
+                      str, super, zip) # http://python-future.org/imports.html
 
 #base
 import argparse
@@ -38,29 +38,21 @@ import ancLD_funcs as LDadmix
 # check boundary conditions at the end of iterations - still with likelihood
 # find cases where the result depend on the starting conditions - maybe haplotype switching
 # flag for edge cases - should we allow changing?
-# post edge-case likelihoods - how to check, one at a time, or all at once?
-# allow output format like STRUCTURE p files
 # incorporate simulated data
 # common output format for simulated data and analyzed data
-# can I support both Python 2 and 3?
 # firm up an example data set
 # compare the LD calculations external libraries that work on vcf
 # add acknowledgements and a link to the greenland paper - Garrett, Filipe
-# optional log file with each run? -probably not needed
 # speed up loglike calculation?
 # option to ditch the likelihood calculations and use delta in haplotype freqs to stop EM
 # check global variables within numba functions
-# include bp/cM positions of each locus
 # make a post_processing script
 #   this would produce an LD-decay output and maybe also a plot with a line per population
 # double check the alleles the freqs pertain to ("The numbers 0-2 represent the number of A2 alleles as specified in the .bim file")
-# clean up formatting of the output for single-locus EM
-# cmd line flag to disable numba
 # optional numba decorator for the single-locus frequency estiamtes
 
 
 # DEBUG = False
-#
 
 
 # argparse
@@ -85,7 +77,7 @@ parser.add_argument('-N', action='store_true',
 parser.add_argument('-P', type=int, default=4,
 	help='use [P] cpus')
 
-# EM
+# EM parameters
 parser.add_argument('-S', type=int, default=0,
 	help='random number seed, used to initialize haplotype frequencies')
 parser.add_argument('-I', type=int, default=100,
@@ -97,7 +89,7 @@ parser.add_argument('-J', action='store_true',
 	help='set this flag to disable numba JIT compilation')
 
 parser.add_argument('-profile', action='store_true',
-	help='set this flag to profile the code')
+	help='set this flag to profile the code, for debugging')
 
 # Output
 parser.add_argument('-O', type=str, default = '../scratch/example_1.out',
@@ -179,12 +171,13 @@ try:
 except ValueError:
 	pass
 
+# supply a within-chromosome index for each locus
+loci_df['chrom_idx'] = loci_df.groupby(['chrom']).cumcount()+1
 
 # bookkeeping
 data_nloci, data_nsamples = geno_array.shape
 assert data_nloci == len(loci_df), "The number of loci doesn't match!"
 assert data_nsamples == len(samples_df), "The number of samples doesn't match!"
-
 
 print("Shape of genotype data:\n\t{}\tloci\n\t{}\tindividuals".format(data_nloci, data_nsamples))
 
@@ -258,14 +251,17 @@ if not args.F:
 		# get the locus pairs we need to analyze
 		print ("Start CHR: {}".format(CHR))
 		possible_pairs = int((nloci_on_chr[CHR]*(nloci_on_chr[CHR]-1))/2)
+   
+   
+		chr_loci = loci_df.query('chrom == @CHR').set_index('chrom_idx')   
 
-		positions = loci_on_chr[CHR]['pos'].values
+		positions = chr_loci['pos'].values
 		# positions of loci on the chromosome, defaults to bp
 		if DISTANCE_THRESHOLD:
 			if args.C:
-				positions = loci_on_chr[CHR]['cm'].values # use cM position
+				positions = chr_loci['cm'].values # use cM position
 			if args.N:
-				positions = loci_on_chr[CHR]['i'].values # use the number of SNPs
+				positions = chr_loci['i'].values # use the number of SNPs
 
 
 		# ensure the positions are monotonically increasing (sorted)
@@ -304,10 +300,11 @@ if not args.F:
 			print("\t\tfinished in {:.6} \tseconds, writing to disk".format(t2-t1))
 
 			# get the locus-specifc values
+			# oops the indexes here are CHR-specific
 			locus1_idx = batch_EM_res[:,0]
 			locus2_idx = batch_EM_res[:,1]
-			locus1_df = loci_df.iloc[locus1_idx]
-			locus2_df = loci_df.iloc[locus2_idx]
+			locus1_df = chr_loci.iloc[locus1_idx]
+			locus2_df = chr_loci.iloc[locus2_idx]
 			locus1_name = locus1_df['snp'].values
 			locus2_name = locus2_df['snp'].values
 			bp_dist = np.abs(locus1_df['pos'].values - locus2_df['pos'].values)

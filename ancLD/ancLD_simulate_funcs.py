@@ -48,7 +48,7 @@ def get_hap_freqs_fromLD(true_r2, true_p1, true_p2):
 
 
 def sample_haplotypes(n, pab, paB, pAb, pAB):
-	"""given 4 haplotype freqeuncies, return n haplotypes sampled from those freqeuenices """
+	"""given 4 haplotype frequencies, return n haplotypes sampled from those frequencies """
 	assert (np.allclose(1.0, pab+ paB + pAb + pAB)) # freqeuncies must add to 1
 	choices = np.random.choice(a = 4, size = n, replace = True, p = [pab, paB, pAb, pAB])
 	haps = np.zeros((n, 2))
