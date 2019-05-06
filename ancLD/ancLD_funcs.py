@@ -62,14 +62,12 @@ def load_plinkfile(basepath):
 	return(sample_list, locus_list, my_array, has_missing)
 
 def read_plink_pandas(basepath):
-    (bim, fam, G) = pandas_plink.read_plink(basepath, verbose = False)
+    bim, fam, G = pandas_plink.read_plink(basepath, verbose = False)
     # G is a dask array
     Gp = np.array(G.compute()) # turn the Dask array into a numpy array
     Gp[np.isnan(Gp)] = 9 # use 9 for missing values, rather than nan
     Gp = Gp.astype('i1')
     return(fam, bim, Gp, (Gp>8).any())
-
-
 
 #@optional_numba_decorator
 # pos can be a vector of float or int posistions, as can the maxdist
@@ -91,7 +89,6 @@ def find_idxpairs_maxdist_generator(pos, maxdist):
 			yield siteix
 		siteix += 1
 
-
 #@optional_numba_decorator
 #@jit("float64[:,:](int32, int32)", nopython=True, nogil=False, cache=True)
 @jit(nopython=True, nogil=False, cache=CACHE_JIT)
@@ -108,6 +105,24 @@ def get_rand_hap_freqs(n=2, seed = 0):
 	return(H)
 
 
+@jit(nopython=True, nogil=False, cache=True)
+def map2domain(H, minfreq = 1e-4):
+	"""ensures that frequencies haver get too close to 0 or 1
+	limits determied """
+    maxfreq = 1-minfreq
+    a,b = H.shape
+    asum = np.zeros(a)
+    for i in range(a):
+        for j in range(b):
+            if H[i,j]<minfreq:
+                H[i,j]=minfreq
+            if H[i,j]>maxfreq:
+                H[i,j]=maxfreq
+            asum[i] += H[i,j]
+    for i in range(a):
+        for j in range(b):
+            H[i,j] = H[i,j]/asum[i]
+    return(H)
 
 
 
@@ -132,18 +147,12 @@ def get_LL_numba(Q, H, code):
 	LL += np.log(	ind_hap_freqs[np.where(code == 8)[0], 3] * ind_hap_freqs[np.where(code == 8)[0], 3]).sum()
 	return(LL)
 
-
-# try G as a global
-#G = np.array([0,3,1,4, 3,6,4,7, 1,4,2,5, 4,7,5,8])
-
 @jit(nopython=True, nogil=False, cache=CACHE_JIT)
 def do_multiEM(inputs):
 	""""""
 	H, Q, code, max_iter, tol = inputs # unpack the input
-
-	n_ind = Q.shape[0]
-	n_pops = Q.shape[1]
-
+	n_ind, n_pops = Q.shape
+	H=map2domain(H, minfreq = 0.01)
 	# which combinations of haplotypes produce which genotypes
 	# genotypes with missing values will not be found
 	G = np.array([0,3,1,4, 3,6,4,7, 1,4,2,5, 4,7,5,8])
@@ -177,6 +186,7 @@ def do_multiEM(inputs):
 		H = np.zeros((n_pops, 4))
 		for z in range(n_pops):
 			H[z] = post[z]/np.sum(post[z])
+		H=map2domain(H)
 
 		# check to end
 		new_LL = get_LL_numba(Q = Q, H = H , code = code)
@@ -188,9 +198,156 @@ def do_multiEM(inputs):
 	return(H, new_LL, i)
 
 
+
+
+@jit(nopython=True, nogil=False, cache=True)
+def do_accelEM(inputs):
+	""""""
+	H, Q, code, max_iter, tol = inputs # unpack the input
+	n_ind, n_pops = Q.shape
+	# which combinations of haplotypes produce which genotypes
+	# genotypes with missing values will not be found
+	G = np.array([0,3,1,4, 3,6,4,7, 1,4,2,5, 4,7,5,8])
+
+	H=map2domain(H,minfreq = 0.01)
+	old_LL = get_LL_numba(Q = Q, H = H , code = code)
+
+	bigstep = -8
+	smallstep = -1
+	mstep = 1.5
+	Hpast = np.zeros((3, 2, 4))
+	Hpast[0,:] = H
+
+	# start iteration here
+	for i in range(0,max_iter):
+		mod = i%3
+		norm = np.zeros(n_ind)
+		isum = np.zeros((n_ind, n_pops, 4)) # hold sums over the 4 haplotypes from each pop in each ind
+		for hap1 in range(4):				# index of haplotype in first spot
+			for hap2 in range(4):			# index of haplotype in second spot
+				for ind, icode in enumerate(code):   # individuals
+					if icode == G[4 * hap1 + hap2]:   # if the current pair of haplotypes is consistent with the given genotype
+						for z1 in range(n_pops):			# source pop of hap1
+							for z2 in range(n_pops):		# source pop of hap2
+								raw = Q[ind, z1] * H[z1, hap1] * Q[ind, z2] * H[z2, hap2]
+								isum[ind, z1, hap1] += raw
+								isum[ind, z2, hap2] += raw
+								norm[ind] += raw
+		norm[norm == 0] = 1 # avoid the division by zero due to missing data
+		# normalized sum over individuals
+		post = np.zeros((n_pops, 4))
+		for ind in range(n_ind):
+			for z in range(n_pops):
+				for hap in range(4):
+					#update post for each hap in each pop
+					post[z, hap] += isum[ind, z, hap]/norm[ind] #  can we use this estimate an 'effective sample size?'
+
+		# scale the sums so they sum to one  - now represents the haplotype frequencies within pops
+		H = np.zeros((n_pops, 4))
+		for z in range(n_pops):
+			H[z] = post[z]/np.sum(post[z])
+		H=map2domain(H)
+
+		Hpast[mod,:] = H
+		if mod == 2:
+			r = Hpast[1] - Hpast[0]
+			v = Hpast[2] - Hpast[1] - r
+			alpha = -1* np.linalg.norm(r)/np.linalg.norm(v)
+			if alpha > smallstep:
+				alpha = smallstep # maybe we should stop the acceleration at this point?
+				#smallstep = alpha/mstep
+			if alpha < bigstep: # # alpha is
+				alpha = bigstep
+				bigstep = alpha*mstep
+			Hjump = Hpast[0] - (2*alpha*r) + (v*alpha**2)
+			H=map2domain(Hjump)
+			old_LL = get_LL_numba(Q = Q, H = H , code = code)
+
+			continue # so there is at least one more EM step
+
+		# check to end
+		new_LL = get_LL_numba(Q = Q, H = H , code = code)
+		delta_LL = new_LL - old_LL
+		if delta_LL <= tol:
+			break
+		old_LL = new_LL
+	return(H, new_LL, i)
+
+@jit(nopython=True, nogil=False, cache=True)
+def do_accelEM_stopfreqs(inputs):
+	"""stop criteria based on the change on haplotype frequencies"""
+	H, Q, code, max_iter, tol = inputs # unpack the input
+	n_ind, n_pops = Q.shape
+	# which combinations of haplotypes produce which genotypes
+	G = np.array([0,3,1,4, 3,6,4,7, 1,4,2,5, 4,7,5,8])
+	# constrain each inital haplotype frequency to a min of 1% within each pop
+	H=map2domain(H, minfreq = 0.01)
+	old_H = H # probably dont need this - could use the Hpast as well
+
+	bigstep = -8
+	smallstep = -1
+	mstep = 1.5
+	Hpast = np.zeros((3, 2, 4)) # store the three values of H
+	Hpast[0,:] = H
+
+	# start iteration here
+	for i in range(1,max_iter+1):
+		mod = i%3
+		norm = np.zeros(n_ind)
+		isum = np.zeros((n_ind, n_pops, 4)) # hold sums over the 4 haplotypes from each pop in each ind
+		for hap1 in range(4):				# index of haplotype in first spot
+			for hap2 in range(4):			# index of haplotype in second spot
+				for ind, icode in enumerate(code):   # individuals
+					if icode == G[4 * hap1 + hap2]:   # if the current pair of haplotypes is consistent with the given genotype
+						for z1 in range(n_pops):			# source pop of hap1
+							for z2 in range(n_pops):		# source pop of hap2
+								raw = Q[ind, z1] * H[z1, hap1] * Q[ind, z2] * H[z2, hap2]
+								isum[ind, z1, hap1] += raw
+								isum[ind, z2, hap2] += raw
+								norm[ind] += raw
+		norm[norm == 0] = 1 # avoid the division by zero due to missing data
+		# normalized sum over individuals
+		post = np.zeros((n_pops, 4))
+		for ind in range(n_ind):
+			for z in range(n_pops):
+				for hap in range(4):
+					#update post for each hap in each pop
+					post[z, hap] += isum[ind, z, hap]/norm[ind] #  can we use this estimate an 'effective sample size?'
+
+		# scale the sums so they sum to one  - now represents the haplotype frequencies within pops
+		H = np.zeros((n_pops, 4))
+		for z in range(n_pops):
+			H[z] = post[z]/np.sum(post[z])
+		H=map2domain(H)
+		Hpast[mod,:] = H
+
+		if mod == 2:
+			r = Hpast[1] - Hpast[0]
+			v = Hpast[2] - Hpast[1] - r
+			alpha = -1* np.linalg.norm(r)/np.linalg.norm(v) # S3 from doi:10.1111/j.1467-9469.2007.00585.x
+			if alpha > smallstep:
+				alpha = smallstep # maybe we should stop the acceleration at this point?
+				#smallstep = alpha/mstep
+			if alpha < bigstep: # # alpha is
+				alpha = bigstep
+				bigstep = alpha*mstep
+			Hjump = Hpast[0] - (2*alpha*r) + (v*alpha**2)
+			H=map2domain(Hjump)
+			continue # so there is at least one more EM step
+
+		# check to end
+		delta_H = np.max(np.abs(H - old_H))
+		if delta_H < tol: # this is hardcoded
+			break
+		old_H = H
+	LL = get_LL_numba(Q = Q, H = H , code = code)
+	return(H, LL, i)
+
+
 #@jit(#"void(int32[:, :], i1[:, :], f8[:, :], f8[:, :], i2, f8, i8, i8[:])",
 @jit(nopython=True, nogil=True, cache=CACHE_JIT)
-def multiprocess_EM_inner(pairs_inner, shared_genoMatrix, shared_resMatrix, Q, EM_iter, EM_tol, start_idx, seeds):
+def multiprocess_EM_inner(pairs_inner, shared_genoMatrix, shared_resMatrix, Q, EM_iter,
+	EM_tol, start_idx, seeds, EM_accel, EM_stop_haps):
 	npops = Q.shape[1]
 	w = start_idx #  used to index the results matrix
 
@@ -203,7 +360,12 @@ def multiprocess_EM_inner(pairs_inner, shared_genoMatrix, shared_resMatrix, Q, E
 		H = get_rand_hap_freqs(n = npops, seed = seed)
 
 		# do the EM
-		res_EM = do_multiEM((H, Q, codes, EM_iter, EM_tol))
+		if (EM_accel & EM_stop_haps):
+			res_EM = do_accelEM_stopfreqs((H, Q, codes, EM_iter, EM_tol))
+		elif EM_accel:
+			res_EM = do_accelEM((H, Q, codes, EM_iter, EM_tol))
+		else:
+			res_EM = do_multiEM((H, Q, codes, EM_iter, EM_tol))
 
 		flags = np.zeros(npops)
 		LL = res_EM[1]
@@ -231,8 +393,8 @@ def multiprocess_EM_inner(pairs_inner, shared_genoMatrix, shared_resMatrix, Q, E
 		w +=1
 
 
-def multiprocess_EM_outer(pairs_outer, shared_genoMatrix, Q, cpus, EM_iter, EM_tol, seeds):
-	# TODO pass seeds along in a better way
+def multiprocess_EM_outer(pairs_outer, shared_genoMatrix, Q, cpus, EM_iter, EM_tol, seeds,
+		EM_accel, EM_stop_haps):
 
 	# spread the pairs across cpus
 	len_pairs = len(pairs_outer)
@@ -252,7 +414,7 @@ def multiprocess_EM_outer(pairs_outer, shared_genoMatrix, Q, cpus, EM_iter, EM_t
 
 	# set up processes
 	processes = [multiprocessing.Process(target=multiprocess_EM_inner, args=(job, shared_genoMatrix, shared_resMatrix,
-			Q, EM_iter, EM_tol, next(ix_starts), seeds)) for job in jobs]
+			Q, EM_iter, EM_tol, next(ix_starts), seeds, EM_accel, EM_stop_haps)) for job in jobs]
 
 	# Run processes
 	for proc in processes:
@@ -543,6 +705,7 @@ def df2csv(df, fname, formats, mode):
 		if mode == 'w':
 			OUTFILE.write(sep.join(df.columns) + '\n')
 		for row in df.itertuples(index=False):
+			# is this really the best way to build up strings?
 			ss = ''
 			for ii in range(Nd):
 				ss += formats[ii] % row[ii]
@@ -550,6 +713,9 @@ def df2csv(df, fname, formats, mode):
 					ss += sep
 			OUTFILE.write(ss+'\n')
 
+def df2csv2(df, fname, formats, mode):
+	"""now with string-literals"""
+	pass
 
 
 #@optional_numba_decorator

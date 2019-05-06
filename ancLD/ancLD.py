@@ -12,7 +12,6 @@ import ctypes
 import time
 import os
 
-
 try:
 	# make sure that numpy doesn't try to use all cores to vectorize matrix operations
 	import mkl
@@ -29,30 +28,25 @@ import pandas as pd
 import ancLD_funcs as LDadmix
 
 
-
-
-
-
 ## TODO
-# deal with a haplotype that is fixed in one population - can complicate the post-processing
-# check boundary conditions at the end of iterations - still with likelihood
+# ensure that EM is reaching a reasonable stopping point
 # find cases where the result depend on the starting conditions - maybe haplotype switching
-# flag for edge cases - should we allow changing?
 # incorporate simulated data
 # common output format for simulated data and analyzed data
 # firm up an example data set
+# default to gzipped output
 # compare the LD calculations external libraries that work on vcf
 # add acknowledgements and a link to the greenland paper - Garrett, Filipe
-# speed up loglike calculation?
+# speedup
+## 	accelerated EM
 # option to ditch the likelihood calculations and use delta in haplotype freqs to stop EM
 # check global variables within numba functions
 # make a post_processing script
 #   this would produce an LD-decay output and maybe also a plot with a line per population
 # double check the alleles the freqs pertain to ("The numbers 0-2 represent the number of A2 alleles as specified in the .bim file")
-# optional numba decorator for the single-locus frequency estiamtes
+# optional numba decorator for the single-locus frequency estimates
 
 
-# DEBUG = False
 
 
 # argparse
@@ -75,21 +69,28 @@ parser.add_argument('-N', action='store_true',
 
 # Threading
 parser.add_argument('-P', type=int, default=4,
-	help='use [P] cpus')
+	help='use P cpus')
 
 # EM parameters
 parser.add_argument('-S', type=int, default=0,
 	help='random number seed, used to initialize haplotype frequencies')
-parser.add_argument('-I', type=int, default=100,
+parser.add_argument('-I', type=int, default=200,
 	help='max number of EM iterations')
-parser.add_argument('-T', type=float, default=1e-6,
-	help='EM stopping tolerance, in loglike units')
+parser.add_argument('-T', type=float, default=1e-5,
+	help='EM stop criteria')
+
+# need to implement these flags
+parser.add_argument('-like', action='store_true',
+	help = 'set this flag to use delta loglikelihood as the EM stop criteria')
+parser.add_argument('-X', action='store_true',
+	help = 'set this flag to disable the accelerated EM')
+
 
 parser.add_argument('-J', action='store_true',
 	help='set this flag to disable numba JIT compilation')
 
 parser.add_argument('-profile', action='store_true',
-	help='set this flag to profile the code, for debugging')
+	help='set this flag to profile the code (for debugging)')
 
 # Output
 parser.add_argument('-O', type=str, default = '../scratch/example_1.out',
@@ -153,6 +154,12 @@ DISTANCE_THRESHOLD = float(args.D) # allowable distance between loci
 PAIR_LIMIT = int(args.L)
 EM_ITER_LIMIT = args.I
 EM_TOL = args.T
+EM_ACCEL = True
+if args.X:
+	EM_ACCEL = False
+EM_STOP_HAPS = True
+if args.like:
+	EM_STOP_HAPS = False
 BATCH_SIZE = args.B
 THREADS = args.P
 GZIP = args.Z
@@ -165,20 +172,11 @@ else:
 print("\n------------------\nLoading data:")
 #sample_list, locus_list, geno_array, HAS_MISSING = LDadmix.load_plinkfile(args.G)
 samples_df, loci_df, geno_array, HAS_MISSING = LDadmix.read_plink_pandas(args.G)
-# see if the chromosomes can be interpreted as ints
-try:
-	loci_df['chrom'] = loci_df['chrom'].astype(int)
-except ValueError:
-	pass
-
-# supply a within-chromosome index for each locus
-loci_df['chrom_idx'] = loci_df.groupby(['chrom']).cumcount()+1
 
 # bookkeeping
 data_nloci, data_nsamples = geno_array.shape
 assert data_nloci == len(loci_df), "The number of loci doesn't match!"
 assert data_nsamples == len(samples_df), "The number of samples doesn't match!"
-
 print("Shape of genotype data:\n\t{}\tloci\n\t{}\tindividuals".format(data_nloci, data_nsamples))
 
 
@@ -205,15 +203,21 @@ print("------------------\n")
 print("\n------------------")
 print("Setting up the analysis")
 
+
+# see if the chromosomes can be interpreted as ints
+try:
+	loci_df['chrom'] = loci_df['chrom'].astype(int)
+except ValueError:
+	pass
+
+# supply a within-chromosome index for each locus
+loci_df['chrom_idx'] = loci_df.groupby(['chrom']).cumcount()+1
 # check for multiple chromosomes here
 seen_chromosomes = sorted(list(set(loci_df['chrom'])))
 # check if all chromosome names can be interpreted as inputs
 
-
-
 print("\nFound loci on {} different chromosome(s)".format(len(seen_chromosomes),
 	','.join([str(xx) for xx in seen_chromosomes])))
-
 
 nloci_on_chr = dict()  # number of loci on each chromosome
 loci_on_chr = dict()   # loci on each chromosome - these are
@@ -222,10 +226,8 @@ for CHR in seen_chromosomes:
 	loci_on_chr[CHR] = loci_df.query('chrom == @CHR')
 	nloci_on_chr[CHR] = len(loci_on_chr[CHR])
 
-
 for (CHR, count) in nloci_on_chr.items():
 	print ("\t{:>11,} loci on chromosome {}".format(count, CHR))
-
 print ("\n")
 
 
@@ -239,10 +241,6 @@ shared_q_array = multiprocessing.Array(ctypes.c_double, q.flatten(), lock = None
 shared_q_matrix = np.frombuffer(shared_q_array.get_obj(), dtype='f8').reshape(array_dim)
 
 # main LD analysis
-
-
-
-
 if not args.F:
 	SEEN_PAIRS = 0
 	FIRST = True
@@ -251,9 +249,8 @@ if not args.F:
 		# get the locus pairs we need to analyze
 		print ("Start CHR: {}".format(CHR))
 		possible_pairs = int((nloci_on_chr[CHR]*(nloci_on_chr[CHR]-1))/2)
-   
-   
-		chr_loci = loci_df.query('chrom == @CHR').set_index('chrom_idx')   
+
+		chr_loci = loci_df.query('chrom == @CHR').set_index('chrom_idx')
 
 		positions = chr_loci['pos'].values
 		# positions of loci on the chromosome, defaults to bp
@@ -262,7 +259,6 @@ if not args.F:
 				positions = chr_loci['cm'].values # use cM position
 			if args.N:
 				positions = chr_loci['i'].values # use the number of SNPs
-
 
 		# ensure the positions are monotonically increasing (sorted)
 		assert np.all(np.diff(positions) >=0)
@@ -295,12 +291,11 @@ if not args.F:
 			# do the EM
 			t1 = time.time()
 			batch_EM_res = LDadmix.multiprocess_EM_outer(pairs_outer=batch, shared_genoMatrix=shared_geno_matrix, Q=shared_q_matrix, cpus=THREADS,
-				EM_iter = EM_ITER_LIMIT, EM_tol = EM_TOL, seeds = shared_seeds_np)
+				EM_iter = EM_ITER_LIMIT, EM_tol = EM_TOL, seeds = shared_seeds_np, EM_accel = EM_ACCEL, EM_stop_haps = EM_STOP_HAPS)
 			t2 = time.time()
 			print("\t\tfinished in {:.6} \tseconds, writing to disk".format(t2-t1))
 
 			# get the locus-specifc values
-			# oops the indexes here are CHR-specific
 			locus1_idx = batch_EM_res[:,0]
 			locus2_idx = batch_EM_res[:,1]
 			locus1_df = chr_loci.iloc[locus1_idx]
@@ -322,18 +317,8 @@ if not args.F:
 				pop_df.columns = ['i1', 'i2', 'non_missing', 'logLike', 'iter', 'flag', 'Hap00', 'Hap01', 'Hap10', 'Hap11']
 				pop_df[['i1', 'i2', 'non_missing', 'iter', 'flag']] = pop_df[['i1', 'i2', 'non_missing', 'iter', 'flag']].astype(np.int)
 				r2, D, Dprime, pA, pB = LDadmix.get_sumstats_from_haplotype_freqs(batch_EM_res[:, 5+NPOPS+4*popix: 9+NPOPS+popix*4]) # LD for each pop
-				# distance between loci
-				#bp_dist =  [np.abs(loci_on_chr[CHR]['pos'].values[i] - loci_on_chr[CHR]['pos'].values[j]) for (i,j) in zip(pop_df['i1'], pop_df['i2'])]
-				#genetic_dist = [np.abs(loci_on_chr[CHR]['cm'].values[i] - loci_on_chr[CHR]['cm'].values[j]) for (i,j) in zip(pop_df['i1'], pop_df['i2'])]
-				#genetic_dist = [np.abs(loci_on_chr[CHR][i].position - loci_on_chr[CHR][j].position) for (i,j) in zip(pop_df['i1'], pop_df['i2'])]
-				#assert False, 'These are giving the wrong numbers'
-
 				pop_df['CHR'] = CHR
-				#pop_df['locus1'] = [loci_on_chr[CHR]['snp'].values[i] for i in pop_df['i1']] #  is this wrong?
-				#pop_df['locus2'] = [loci_on_chr[CHR]['snp'].values[i] for i in pop_df['i2']]
-				#pop_df['bp_dist'] = bp_dist
-				#pop_df['genetic_dist'] = genetic_dist
-				pop_df['locus1'] = locus1_name #  is this wrong?
+				pop_df['locus1'] = locus1_name
 				pop_df['locus2'] = locus2_name
 				pop_df['bp_dist'] = bp_dist
 				pop_df['genetic_dist'] = genetic_dist
@@ -366,8 +351,7 @@ if not args.F:
 
 			# new, faster function to write the csv file
 			# does not yet support compression
-			LDadmix.df2csv(df=batch_EM_df, fname=OUTPATH, formats = formats, mode=mode)
-
+			LDadmix.df2csv(df = batch_EM_df, fname = OUTPATH, formats = formats, mode = mode)
 
 			FIRST = False
 			del batch_EM_df, pop_df, pop_dfs, bp_dist, genetic_dist, r2, D, Dprime, pA, pB # cleanup - does this help?
@@ -378,6 +362,8 @@ if not args.F:
 			SEEN_PAIRS += n_analysis_pairs
 
 
+
+## Single locus analysis
 if args.F:
 	print("Doing single locus analysis!")
 	n_bootstraps = 0
@@ -423,6 +409,8 @@ if args.F:
 #		np.savetxt(OUTPATH, batch_EM_res, delimiter = '\t',
 #			fmt = ['%9i', '%9i','%9i', '%1.8f', '%1.6f', '%1.6f', '%1.6f', '%1.6f', '%1.6f', '%1.6f'])
 
+
+
 print("\nAll Done!")
 print("------------------")
 print("output file name: {}".format(OUTPATH))
@@ -432,8 +420,7 @@ print("output file size: {:.4} MB".format(output_size_megabytes))
 
 
 
-# below jsut for profiling
-
+# below just for profiling
 if PROFILE:
 	p.disable()
 	sortby = 'cumulative'
