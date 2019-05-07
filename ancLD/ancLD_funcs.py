@@ -8,7 +8,6 @@ import itertools
 import ctypes
 
 import numpy as np
-#from plinkio import plinkfile
 import pandas_plink
 
 
@@ -18,7 +17,6 @@ CACHE_JIT = True
 
 
 _numba_available = True
-
 try:
 	from numba import jit
 	print("------------------")
@@ -69,7 +67,6 @@ def read_plink_pandas(basepath):
     Gp = Gp.astype('i1')
     return(fam, bim, Gp, (Gp>8).any())
 
-#@optional_numba_decorator
 # pos can be a vector of float or int posistions, as can the maxdist
 @jit(nopython=True, nogil=False, cache=False)
 def find_idxpairs_maxdist_generator(pos, maxdist):
@@ -89,8 +86,6 @@ def find_idxpairs_maxdist_generator(pos, maxdist):
 			yield siteix
 		siteix += 1
 
-#@optional_numba_decorator
-#@jit("float64[:,:](int32, int32)", nopython=True, nogil=False, cache=True)
 @jit(nopython=True, nogil=False, cache=CACHE_JIT)
 def get_rand_hap_freqs(n=2, seed = 0):
 	"""returns an (n,4) dimensioned numpy array of random haplotype frequencies,
@@ -109,20 +104,20 @@ def get_rand_hap_freqs(n=2, seed = 0):
 def map2domain(H, minfreq = 1e-4):
 	"""ensures that frequencies haver get too close to 0 or 1
 	limits determied """
-    maxfreq = 1-minfreq
-    a,b = H.shape
-    asum = np.zeros(a)
-    for i in range(a):
-        for j in range(b):
-            if H[i,j]<minfreq:
-                H[i,j]=minfreq
-            if H[i,j]>maxfreq:
-                H[i,j]=maxfreq
-            asum[i] += H[i,j]
-    for i in range(a):
-        for j in range(b):
-            H[i,j] = H[i,j]/asum[i]
-    return(H)
+	maxfreq = 1-minfreq
+	a,b = H.shape
+	asum = np.zeros(a)
+	for i in range(a):
+		for j in range(b):
+			if H[i,j]<minfreq:
+				H[i,j]=minfreq
+			if H[i,j]>maxfreq:
+				H[i,j]=maxfreq
+			asum[i] += H[i,j]
+	for i in range(a):
+		for j in range(b):
+			H[i,j] = H[i,j]/asum[i]
+	return(H)
 
 
 
