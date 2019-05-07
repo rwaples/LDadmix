@@ -1,7 +1,8 @@
 from __future__ import absolute_import, division, print_function
+# http://python-future.org/imports.html
 from builtins import (ascii, bytes, chr, dict, filter, hex, input,
                       int, map, next, oct, open, pow, range, round,
-                      str, super, zip) # http://python-future.org/imports.html
+                      str, super, zip)
 
 #base
 import argparse
@@ -12,8 +13,8 @@ import ctypes
 import time
 import os
 
+# make sure that numpy doesn't try to use all cores to vectorize matrix operations
 try:
-	# make sure that numpy doesn't try to use all cores to vectorize matrix operations
 	import mkl
 	mkl.set_num_threads(1)
 except ImportError:
@@ -25,7 +26,9 @@ import numpy as np
 import pandas as pd
 
 #internal
-import ancLD_funcs as LDadmix
+import utils
+import read_write
+import multiprocess_control
 
 
 ## TODO
@@ -43,7 +46,7 @@ import ancLD_funcs as LDadmix
 # check global variables within numba functions
 # make a post_processing script
 #   this would produce an LD-decay output and maybe also a plot with a line per population
-# double check the alleles the freqs pertain to ("The numbers 0-2 represent the number of A2 alleles as specified in the .bim file")
+# double check corrspondence between bim file and reported freqs
 # optional numba decorator for the single-locus frequency estimates
 
 
@@ -110,9 +113,8 @@ PROFILE = False
 if args.profile:
 	print("Profiling Enabled")
 	PROFILE = True
-	import data_profiler as profiler
-	import pstats
-	p = profiler.Profile(signatures=False)
+	import ancLD_profile as ancLD_profile
+	p = ancLD_profile.profiler.Profile(signatures=False)
 	p.enable()
 
 
@@ -170,8 +172,7 @@ else:
 	OUTPATH = args.O
 
 print("\n------------------\nLoading data:")
-#sample_list, locus_list, geno_array, HAS_MISSING = LDadmix.load_plinkfile(args.G)
-samples_df, loci_df, geno_array, HAS_MISSING = LDadmix.read_plink_pandas(args.G)
+samples_df, loci_df, geno_array, HAS_MISSING = read_write.read_plink_pandas(args.G)
 
 # bookkeeping
 data_nloci, data_nsamples = geno_array.shape
@@ -179,13 +180,13 @@ assert data_nloci == len(loci_df), "The number of loci doesn't match!"
 assert data_nsamples == len(samples_df), "The number of samples doesn't match!"
 print("Shape of genotype data:\n\t{}\tloci\n\t{}\tindividuals".format(data_nloci, data_nsamples))
 
-
 if args.Q is None:
 	print("No Q matrix was specified, assuming a single population.")
 	# Make a Q matrix with just one pop
 	q = np.ones((data_nsamples, 1))
 else:
-	q = pd.read_csv(args.Q, header = None, sep = None, engine = 'python') # hopefully this should allow space and tab-delimited files
+	# hopefully this should accomidate both space and tab-delimited files
+	q = pd.read_csv(args.Q, header = None, sep = None, engine = 'python')
 	q = q.values
 print("Shape of Q data:\n\t{}\tindividuals\n\t{}\tpopulations".format(q.shape[0], q.shape[1]))
 print("\tMean of the admixture components: {}".format(q.mean(axis = 0)))
@@ -249,22 +250,22 @@ if not args.F:
 		# get the locus pairs we need to analyze
 		print ("Start CHR: {}".format(CHR))
 		possible_pairs = int((nloci_on_chr[CHR]*(nloci_on_chr[CHR]-1))/2)
-
 		chr_loci = loci_df.query('chrom == @CHR').set_index('chrom_idx')
-
-		positions = chr_loci['pos'].values
 		# positions of loci on the chromosome, defaults to bp
+		positions = chr_loci['pos'].values
 		if DISTANCE_THRESHOLD:
 			if args.C:
 				positions = chr_loci['cm'].values # use cM position
 			if args.N:
 				positions = chr_loci['i'].values # use the number of SNPs
 
-		# ensure the positions are monotonically increasing (sorted)
+		# ensure the positions are monotonically increasing
 		assert np.all(np.diff(positions) >=0)
 
 		# could skip if there is no distance threshold, but it is decently fast
-		analysis_pairs = np.fromiter(LDadmix.find_idxpairs_maxdist_generator(positions, DISTANCE_THRESHOLD) , dtype = 'int32').reshape(-1,2)
+		analysis_pairs = np.fromiter(
+			utils.find_idxpairs_maxdist_generator(positions, DISTANCE_THRESHOLD),
+			dtype = 'int32').reshape(-1,2)
 		n_analysis_pairs = len(analysis_pairs)
 
 		# if a pair_limit is set, restrict the analysis to the remaining pairs and set to stop
@@ -274,24 +275,37 @@ if not args.F:
 			n_analysis_pairs = len(analysis_pairs)
 			STOP = True
 
-		print ("\tWill analyze {:,} / {:,} possible locus pairs".format( n_analysis_pairs, possible_pairs))
+		print ("\tWill analyze {:,} / {:,} possible locus pairs".format(
+			n_analysis_pairs, possible_pairs))
 
 		# make a shared geno_array (used by all processes)
 		chr_geno_array = geno_array[loci_on_chr[CHR]['i'].values]
 		array_dim = chr_geno_array.shape
-		shared_geno_array = multiprocessing.Array(ctypes.c_int8, chr_geno_array.flatten(), lock = None)
-		shared_geno_matrix = np.frombuffer(shared_geno_array.get_obj(), dtype='i1').reshape(array_dim)
+		shared_geno_array = multiprocessing.Array(
+			ctypes.c_int8, chr_geno_array.flatten(), lock = None)
+		shared_geno_matrix = np.frombuffer(
+			shared_geno_array.get_obj(), dtype='i1').reshape(array_dim)
 		del chr_geno_array
+		del shared_geno_array
 
-		# if there are more analysis_pairs than the requested batch size, break it up across multiple runs
+		# if analysis_pairs > requested batch size, break across multiple runs
 		batches = np.split(analysis_pairs, np.arange(BATCH_SIZE, n_analysis_pairs, BATCH_SIZE))
-		print ("\tCHR {} will have {} output batch(es) with up to {:,} pairs each".format(CHR, len(batches), BATCH_SIZE))
+		print ("\tCHR {} will have {} output batch(es) with up to {:,} pairs each".format(
+			CHR, len(batches), BATCH_SIZE))
 		for count, batch in enumerate(batches, start = 1): # batch numbers start at 1
 			print ("\tStarting batch {}".format(count))
 			# do the EM
 			t1 = time.time()
-			batch_EM_res = LDadmix.multiprocess_EM_outer(pairs_outer=batch, shared_genoMatrix=shared_geno_matrix, Q=shared_q_matrix, cpus=THREADS,
-				EM_iter = EM_ITER_LIMIT, EM_tol = EM_TOL, seeds = shared_seeds_np, EM_accel = EM_ACCEL, EM_stop_haps = EM_STOP_HAPS)
+			batch_EM_res = multiprocess_control.multiprocess_EM_outer(
+				pairs_outer=batch,
+				shared_genoMatrix=shared_geno_matrix,
+				Q=shared_q_matrix,
+				cpus=THREADS,
+				EM_iter = EM_ITER_LIMIT,
+				EM_tol = EM_TOL,
+				seeds = shared_seeds_np,
+				EM_accel = EM_ACCEL,
+				EM_stop_haps = EM_STOP_HAPS)
 			t2 = time.time()
 			print("\t\tfinished in {:.6} \tseconds, writing to disk".format(t2-t1))
 
@@ -316,7 +330,7 @@ if not args.F:
 
 				pop_df.columns = ['i1', 'i2', 'non_missing', 'logLike', 'iter', 'flag', 'Hap00', 'Hap01', 'Hap10', 'Hap11']
 				pop_df[['i1', 'i2', 'non_missing', 'iter', 'flag']] = pop_df[['i1', 'i2', 'non_missing', 'iter', 'flag']].astype(np.int)
-				r2, D, Dprime, pA, pB = LDadmix.get_sumstats_from_haplotype_freqs(batch_EM_res[:, 5+NPOPS+4*popix: 9+NPOPS+popix*4]) # LD for each pop
+				r2, D, Dprime, pA, pB = utils.get_sumstats_from_haplotype_freqs(batch_EM_res[:, 5+NPOPS+4*popix: 9+NPOPS+popix*4]) # LD for each pop
 				pop_df['CHR'] = CHR
 				pop_df['locus1'] = locus1_name
 				pop_df['locus2'] = locus2_name
@@ -343,15 +357,13 @@ if not args.F:
 			else:
 				compression = None
 			if FIRST: # clobber and write the header
-				#header = True
 				mode = 'w'
 			else: # append and no header
-				#header = None
 				mode = 'a'
 
 			# new, faster function to write the csv file
-			# does not yet support compression
-			LDadmix.df2csv(df = batch_EM_df, fname = OUTPATH, formats = formats, mode = mode)
+			# does not support compression
+			read_write.df2csv(df = batch_EM_df, fname = OUTPATH, formats = formats, mode = mode)
 
 			FIRST = False
 			del batch_EM_df, pop_df, pop_dfs, bp_dist, genetic_dist, r2, D, Dprime, pA, pB # cleanup - does this help?
@@ -417,75 +429,3 @@ print("output file name: {}".format(OUTPATH))
 output_size_bytes = os.path.getsize(OUTPATH)
 output_size_megabytes = output_size_bytes/1e6
 print("output file size: {:.4} MB".format(output_size_megabytes))
-
-
-
-# below just for profiling
-if PROFILE:
-	p.disable()
-	sortby = 'cumulative'
-	ps = pstats.Stats(p)
-	with open(OUTPATH+'.profile_main', 'w') as OUTFILE:
-		ps.stream = OUTFILE
-		ps.strip_dirs().sort_stats('cumulative').print_stats()
-
-if PROFILE:
-	print("---\nStarting to profile")
-	p = profiler.Profile(signatures=True)
-	p.enable()
-	# do a mini EM loop here
-	SEEN_PAIRS = 0
-	FIRST = True
-	# main analysis loop over chromosomes
-	for CHR in seen_chromosomes:
-		# get the locus pairs we need to analyze
-		print ("Start CHR: {}".format(CHR))
-		possible_pairs = int((nloci_on_chr[CHR]*(nloci_on_chr[CHR]-1))/2)
-
-		positions = np.array([locus.bp_position for locus in loci_on_chr[CHR]])
-		# positions of loci on the chromosome, defaults to bp
-		if DISTANCE_THRESHOLD:
-			if args.C:
-				positions = np.array([locus.position for locus in loci_on_chr[CHR]]) # use cM position
-			if args.N:
-				positions = np.arange(nloci_on_chr[CHR]) # use the number of SNPs
-
-
-		# ensure the positions are monotonically increasing (sorted)
-		assert np.all(np.diff(positions) >=0)
-
-		# could skip if there is no distance threshold, but it is decently fast
-		analysis_pairs = np.fromiter(LDadmix.find_idxpairs_maxdist_generator(positions, DISTANCE_THRESHOLD) , dtype = 'int32').reshape(-1,2)
-		n_analysis_pairs = len(analysis_pairs)
-
-		# if a pair_limit is set, restrict the analysis to the remaining pairs and set to stop
-		STOP = False
-		if PAIR_LIMIT and ((n_analysis_pairs + SEEN_PAIRS) > PAIR_LIMIT):
-			analysis_pairs = analysis_pairs[:(PAIR_LIMIT-SEEN_PAIRS)]
-			n_analysis_pairs = len(analysis_pairs)
-			STOP = True
-
-		print ("\tWill analyze {:,} / {:,} possible locus pairs".format( n_analysis_pairs, possible_pairs))
-
-		# make a shared geno_array (used by all processes)
-		chr_geno_array = geno_array[np.array([(locus.chromosome == CHR) for locus in locus_list])]
-		array_dim = chr_geno_array.shape
-		shared_geno_array = multiprocessing.Array(ctypes.c_int8, chr_geno_array.flatten(), lock = None)
-		shared_geno_matrix = np.frombuffer(shared_geno_array.get_obj(), dtype='i1').reshape(array_dim)
-		del chr_geno_array
-
-		# if there are more analysis_pairs than the requested batch size, break it up across multiple runs
-		batches = np.split(analysis_pairs, np.arange(BATCH_SIZE, n_analysis_pairs, BATCH_SIZE))
-		print ("\tCHR {} will have {} output batch(es) with up to {:,} pairs each".format(CHR, len(batches), BATCH_SIZE))
-		for count, batch in enumerate(batches, start = 1): # batch numbers start at 1
-			print ("\tStarting batch {}".format(count))
-			# do the EM
-			batch_EM_res = LDadmix.multiprocess_EM_profile(pairs_outer=batch, shared_genoMatrix=shared_geno_matrix, Q=shared_q_matrix, cpus=THREADS,
-				EM_iter = EM_ITER_LIMIT, EM_tol = EM_TOL, seeds = shared_seeds_np)
-
-	p.disable()
-	sortby = 'cumulative'
-	ps = pstats.Stats(p)
-	with open(OUTPATH+'.profile_EM', 'w') as OUTFILE:
-		ps.stream = OUTFILE
-		ps.strip_dirs().sort_stats('cumulative').print_stats()
