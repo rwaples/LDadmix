@@ -18,15 +18,17 @@ def do_multiEM(inputs):
 	old_LL = get_LL_numba(Q = Q, H = H , code = code)
 
 	# start iteration here
-	for i in range(1, max_iter+1):
-		norm = np.zeros(n_ind) # maybe just change this to a matrix of ones - then set to zero if data is found to be non-missing
-		isum = np.zeros((n_ind, n_pops, 4)) # hold sums over the 4 haplotypes from each pop in each ind
-		for hap1 in range(4):								# index of haplotype in first spot
-			for hap2 in range(4):							# index of haplotype in second spot
+	for i in range(1,max_iter+1):
+		mod = i%3
+		norm = np.zeros(n_ind)
+		isum = np.zeros((n_ind, n_pops, 4)) # sums over the 4 haps from each pop in each ind
+		for hap1 in range(4):				# index of haplotype in first spot
+			for hap2 in range(4):			# index of haplotype in second spot
 				for ind, icode in enumerate(code):   # individuals
-					if icode == G[4 * hap1 + hap2]:   # if the current pair of haplotypes is consistent with the given genotype
-						for z1 in range(n_pops):					 # source pop of hap1
-							for z2 in range(n_pops):				 # source pop of hap2
+					# if the current pair of haplotypes is consistent with the given genotype
+					if icode == G[4 * hap1 + hap2]:
+						for z1 in range(n_pops):			# source pop of hap1
+							for z2 in range(n_pops):		# source pop of hap2
 								raw = Q[ind, z1] * H[z1, hap1] * Q[ind, z2] * H[z2, hap2]
 								isum[ind, z1, hap1] += raw
 								isum[ind, z2, hap2] += raw
@@ -58,14 +60,15 @@ def do_multiEM(inputs):
 
 @jit(nopython=True, nogil=False, cache=True)
 def do_accelEM(inputs):
-	""""""
+	"""Accelerated SQUAREM
+	see: algorithm S3 in doi.org/10.1111/j.1467-9469.2007.00585.x"""
 	H, Q, code, max_iter, tol = inputs # unpack the input
 	n_ind, n_pops = Q.shape
 	# which combinations of haplotypes produce which genotypes
 	# genotypes with missing values will not be found
 	G = np.array([0,3,1,4, 3,6,4,7, 1,4,2,5, 4,7,5,8])
 
-	H=map2domain(H,minfreq = 0.01)
+	H=map2domain(H, minfreq = 0.01) # ensure the starting hap freqs are >1%
 	old_LL = get_LL_numba(Q = Q, H = H , code = code)
 
 	bigstep = -8
@@ -75,14 +78,15 @@ def do_accelEM(inputs):
 	Hpast[0,:] = H
 
 	# start iteration here
-	for i in range(0,max_iter):
+	for i in range(1,max_iter+1):
 		mod = i%3
 		norm = np.zeros(n_ind)
-		isum = np.zeros((n_ind, n_pops, 4)) # hold sums over the 4 haplotypes from each pop in each ind
+		isum = np.zeros((n_ind, n_pops, 4)) # sums over the 4 haps from each pop in each ind
 		for hap1 in range(4):				# index of haplotype in first spot
 			for hap2 in range(4):			# index of haplotype in second spot
 				for ind, icode in enumerate(code):   # individuals
-					if icode == G[4 * hap1 + hap2]:   # if the current pair of haplotypes is consistent with the given genotype
+					# if the current pair of haplotypes is consistent with the given genotype
+					if icode == G[4 * hap1 + hap2]:
 						for z1 in range(n_pops):			# source pop of hap1
 							for z2 in range(n_pops):		# source pop of hap2
 								raw = Q[ind, z1] * H[z1, hap1] * Q[ind, z2] * H[z2, hap2]
@@ -95,8 +99,9 @@ def do_accelEM(inputs):
 		for ind in range(n_ind):
 			for z in range(n_pops):
 				for hap in range(4):
-					#update post for each hap in each pop
-					post[z, hap] += isum[ind, z, hap]/norm[ind] #  can we use this estimate an 'effective sample size?'
+					# update post for each hap in each pop
+					# can we use this estimate an 'effective sample size?'
+					post[z, hap] += isum[ind, z, hap]/norm[ind]
 
 		# scale the sums so they sum to one  - now represents the haplotype frequencies within pops
 		H = np.zeros((n_pops, 4))
@@ -138,7 +143,7 @@ def do_accelEM_stopfreqs(inputs):
 	G = np.array([0,3,1,4, 3,6,4,7, 1,4,2,5, 4,7,5,8])
 	# constrain each inital haplotype frequency to a min of 1% within each pop
 	H=map2domain(H, minfreq = 0.01)
-	old_H = H # probably dont need this - could use the Hpast as well
+	old_H = H
 
 	bigstep = -8
 	smallstep = -1
@@ -150,11 +155,12 @@ def do_accelEM_stopfreqs(inputs):
 	for i in range(1,max_iter+1):
 		mod = i%3
 		norm = np.zeros(n_ind)
-		isum = np.zeros((n_ind, n_pops, 4)) # hold sums over the 4 haplotypes from each pop in each ind
+		isum = np.zeros((n_ind, n_pops, 4)) # sums over the 4 haps from each pop in each ind
 		for hap1 in range(4):				# index of haplotype in first spot
 			for hap2 in range(4):			# index of haplotype in second spot
 				for ind, icode in enumerate(code):   # individuals
-					if icode == G[4 * hap1 + hap2]:   # if the current pair of haplotypes is consistent with the given genotype
+					# if the current pair of haplotypes is consistent with the given genotype
+					if icode == G[4 * hap1 + hap2]:
 						for z1 in range(n_pops):			# source pop of hap1
 							for z2 in range(n_pops):		# source pop of hap2
 								raw = Q[ind, z1] * H[z1, hap1] * Q[ind, z2] * H[z2, hap2]
@@ -167,10 +173,12 @@ def do_accelEM_stopfreqs(inputs):
 		for ind in range(n_ind):
 			for z in range(n_pops):
 				for hap in range(4):
-					#update post for each hap in each pop
-					post[z, hap] += isum[ind, z, hap]/norm[ind] #  can we use this estimate an 'effective sample size?'
+					# update post for each hap in each pop
+					# can we use this estimate an 'effective sample size?'
+					post[z, hap] += isum[ind, z, hap]/norm[ind]
 
-		# scale the sums so they sum to one  - now represents the haplotype frequencies within pops
+		# scale the sums so they sum to one
+		# now represents the haplotype frequencies within pops
 		H = np.zeros((n_pops, 4))
 		for z in range(n_pops):
 			H[z] = post[z]/np.sum(post[z])
@@ -180,7 +188,7 @@ def do_accelEM_stopfreqs(inputs):
 		if mod == 2:
 			r = Hpast[1] - Hpast[0]
 			v = Hpast[2] - Hpast[1] - r
-			alpha = -1* np.linalg.norm(r)/np.linalg.norm(v) # S3 from doi:10.1111/j.1467-9469.2007.00585.x
+			alpha = -1 * np.linalg.norm(r)/np.linalg.norm(v) # S3
 			if alpha > smallstep:
 				alpha = smallstep # maybe we should stop the acceleration at this point?
 				#smallstep = alpha/mstep
@@ -193,7 +201,7 @@ def do_accelEM_stopfreqs(inputs):
 
 		# check to end
 		delta_H = np.max(np.abs(H - old_H))
-		if delta_H < tol: # this is hardcoded
+		if delta_H < tol:
 			break
 		old_H = H
 	LL = get_LL_numba(Q = Q, H = H , code = code)

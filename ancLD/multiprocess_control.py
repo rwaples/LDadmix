@@ -18,7 +18,7 @@ except:
 def multiprocess_EM_inner(pairs_inner, shared_genoMatrix, shared_resMatrix, Q, EM_iter,
 	EM_tol, start_idx, seeds, EM_accel, EM_stop_haps):
 	npops = Q.shape[1]
-	w = start_idx #  used to index the results matrix
+	w = start_idx #  used to index rows in the results matrix
 
 	for i in range(len(pairs_inner)):
 		pair = pairs_inner[i]
@@ -38,7 +38,7 @@ def multiprocess_EM_inner(pairs_inner, shared_genoMatrix, shared_resMatrix, Q, E
 		LL = res_EM[1]
 		H = res_EM[0]
 
-		flags = utils.flag_maf(H=res_EM[0], maf = 0.05)
+		flags = utils.flag_maf(H=H, maf = 0.05)
 
 		# fill results matrix
 		shared_resMatrix[w,0] = pair[0] # index of first locus
@@ -78,6 +78,7 @@ def multiprocess_EM_outer(pairs_outer, shared_genoMatrix, Q, cpus, EM_iter, EM_t
 	sharedArray = multiprocessing.Array(ctypes.c_double, res.flatten(), lock = None)
 	shared_resMatrix = np.frombuffer(sharedArray.get_obj(), dtype='f8').reshape(res.shape)
 	del res
+	del sharedArray
 
 	# set up processes
 	processes = [multiprocessing.Process(target=multiprocess_EM_inner, args=(job, shared_genoMatrix, shared_resMatrix,
