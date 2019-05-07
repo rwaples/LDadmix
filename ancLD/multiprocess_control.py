@@ -14,7 +14,7 @@ try:
 except:
 	NUMBA_DISABLE_JIT = 1
 
-@jit(nopython=True, nogil=True, cache=True)
+@jit(nopython=True, nogil=True, cache=False)
 def multiprocess_EM_inner(pairs_inner, shared_genoMatrix, shared_resMatrix, Q, EM_iter,
 	EM_tol, start_idx, seeds, EM_accel, EM_stop_haps):
 	npops = Q.shape[1]
@@ -37,8 +37,8 @@ def multiprocess_EM_inner(pairs_inner, shared_genoMatrix, shared_resMatrix, Q, E
 
 		LL = res_EM[1]
 		H = res_EM[0]
-
-		flags = utils.flag_maf(H=H, maf = 0.05)
+		#flags = np.zeros(npops)
+		flags = utils.flag_maf(H, 0.05)
 
 		# fill results matrix
 		shared_resMatrix[w,0] = pair[0] # index of first locus
@@ -87,7 +87,10 @@ def multiprocess_EM_outer(pairs_outer, shared_genoMatrix, Q, cpus, EM_iter, EM_t
 	# Run processes
 	for proc in processes:
 	    proc.start()
-	for proc in processes:
-	    proc.join()
+	try:
+		for proc in processes:
+		    proc.join()
+	except KeyboardInterrupt:
+		print ("Keyboard interrupt in main")
 
 	return(shared_resMatrix)

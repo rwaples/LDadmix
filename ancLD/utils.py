@@ -49,7 +49,7 @@ def find_idxpairs_maxdist_generator(pos, maxdist):
 			yield siteix
 		siteix += 1
 
-@jit(nopython=True, nogil=False, cache=True)
+@jit(nopython=True, nogil=True, cache=True)
 def get_rand_hap_freqs(n=2, seed = 0):
 	"""returns an (n,4) dimensioned numpy array of random haplotype frequencies,
 	where n is the number of pops"""
@@ -63,8 +63,8 @@ def get_rand_hap_freqs(n=2, seed = 0):
 	return(H)
 
 
-@jit(nopython=True, nogil=False, cache=True)
-def map2domain(H, minfreq = 1e-4):
+@jit(nopython=True, nogil=True, cache=True)
+def map2domain(H, minfreq):
 	"""ensures that frequencies haver get too close to 0 or 1
 	limits determied """
 	maxfreq = 1-minfreq
@@ -107,13 +107,12 @@ def get_sumstats_from_haplotype_freqs(H):
 	return(r2, D, Dprime, pA, pB)
 
 @jit(nopython=True, nogil=False, cache=True)
-def flag_maf(H, maf = 0.05):
+def flag_maf(H, maf):
 	upper_maf = 1-maf
 	p1 = H[:, 2] + H[:, 3]
 	p2 = H[:, 1] + H[:, 3]
-
 	flags = (p1<maf) + (p1>upper_maf) + (p2<maf) + (p2>upper_maf)
-	return(flags.T)
+	return(flags)
 
 
 @jit(nopython=True, nogil=False, cache=True)

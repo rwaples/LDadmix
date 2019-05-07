@@ -46,7 +46,7 @@ def do_multiEM(inputs):
 		H = np.zeros((n_pops, 4))
 		for z in range(n_pops):
 			H[z] = post[z]/np.sum(post[z])
-		H=map2domain(H)
+		H=map2domain(H, 1e-4)
 
 		# check to end
 		new_LL = get_LL_numba(Q = Q, H = H , code = code)
@@ -74,7 +74,7 @@ def do_accelEM(inputs):
 	bigstep = -8
 	smallstep = -1
 	mstep = 1.5
-	Hpast = np.zeros((3, 2, 4))
+	Hpast = np.zeros((3, n_pops, 4))
 	Hpast[0,:] = H
 
 	# start iteration here
@@ -107,7 +107,7 @@ def do_accelEM(inputs):
 		H = np.zeros((n_pops, 4))
 		for z in range(n_pops):
 			H[z] = post[z]/np.sum(post[z])
-		H=map2domain(H)
+		H=map2domain(H, 1e-4)
 
 		Hpast[mod,:] = H
 		if mod == 2:
@@ -121,7 +121,7 @@ def do_accelEM(inputs):
 				alpha = bigstep
 				bigstep = alpha*mstep
 			Hjump = Hpast[0] - (2*alpha*r) + (v*alpha**2)
-			H=map2domain(Hjump)
+			H=map2domain(Hjump, 1e-4)
 			old_LL = get_LL_numba(Q = Q, H = H , code = code)
 
 			continue # so there is at least one more EM step
@@ -142,20 +142,23 @@ def do_accelEM_stopfreqs(inputs):
 	# which combinations of haplotypes produce which genotypes
 	G = np.array([0,3,1,4, 3,6,4,7, 1,4,2,5, 4,7,5,8])
 	# constrain each inital haplotype frequency to a min of 1% within each pop
-	H=map2domain(H, minfreq = 0.01)
+	H= map2domain(H, minfreq = 0.01)
 	old_H = H
 
 	bigstep = -8
 	smallstep = -1
 	mstep = 1.5
-	Hpast = np.zeros((3, 2, 4)) # store the three values of H
+	Hpast = np.zeros((3, n_pops, 4)) # store the three values of H
 	Hpast[0,:] = H
 
+	norm = np.zeros(n_ind)
+	isum = np.zeros((n_ind, n_pops, 4))
+	post = np.zeros((n_pops, 4))
 	# start iteration here
 	for i in range(1,max_iter+1):
 		mod = i%3
-		norm = np.zeros(n_ind)
-		isum = np.zeros((n_ind, n_pops, 4)) # sums over the 4 haps from each pop in each ind
+		norm.fill(0)
+		isum.fill(0) # sums over the 4 haps from each pop in each ind
 		for hap1 in range(4):				# index of haplotype in first spot
 			for hap2 in range(4):			# index of haplotype in second spot
 				for ind, icode in enumerate(code):   # individuals
@@ -167,9 +170,12 @@ def do_accelEM_stopfreqs(inputs):
 								isum[ind, z1, hap1] += raw
 								isum[ind, z2, hap2] += raw
 								norm[ind] += raw
-		norm[norm == 0] = 1 # avoid the division by zero due to missing data
+		for j in range(len(norm)):
+			if norm[j] == 0:
+				norm[j] = 1
+		#norm[norm == 0] = 1 # avoid the division by zero due to missing data
 		# normalized sum over individuals
-		post = np.zeros((n_pops, 4))
+		post.fill(0)
 		for ind in range(n_ind):
 			for z in range(n_pops):
 				for hap in range(4):
@@ -182,7 +188,7 @@ def do_accelEM_stopfreqs(inputs):
 		H = np.zeros((n_pops, 4))
 		for z in range(n_pops):
 			H[z] = post[z]/np.sum(post[z])
-		H=map2domain(H)
+		H=map2domain(H, 1e-4)
 		Hpast[mod,:] = H
 
 		if mod == 2:
@@ -195,8 +201,8 @@ def do_accelEM_stopfreqs(inputs):
 			if alpha < bigstep: # # alpha is
 				alpha = bigstep
 				bigstep = alpha*mstep
-			Hjump = Hpast[0] - (2*alpha*r) + (v*alpha**2)
-			H=map2domain(Hjump)
+			Hjump = Hpast[0] - (2*alpha*r) + (v*alpha*alpha)
+			H=map2domain(Hjump, 1e-4)
 			continue # so there is at least one more EM step
 
 		# check to end
@@ -204,5 +210,6 @@ def do_accelEM_stopfreqs(inputs):
 		if delta_H < tol:
 			break
 		old_H = H
-	LL = get_LL_numba(Q = Q, H = H , code = code)
+
+	LL = get_LL_numba(Q = Q, H = H, code = code)
 	return(H, LL, i)
