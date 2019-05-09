@@ -17,8 +17,7 @@ tested on Python 2.7 and Python 3.6
  - numpy
  - pandas
  - pandas-plink
-### optional python packages
- - numba (highly recommended, will speed up the analysis ~100 fold)
+ - numba 
 
 
 ### output format
