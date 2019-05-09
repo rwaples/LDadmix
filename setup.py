@@ -1,8 +1,8 @@
 from setuptools import setup, find_packages
 
 setup(
-    name='ancLD',
-    version='0.1',
+    name='LDadmix',
+    version='0.2',
 	python_requires='>=2.7',
     packages=find_packages(exclude=['tests*']),
     license='GPL 3.0',
