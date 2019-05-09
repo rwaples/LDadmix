@@ -15,6 +15,7 @@ tested on Python 2.7 and Python 3.6
 
 ### python packages
  - numpy
+ - scipy
  - pandas
  - pandas-plink
  - numba 
