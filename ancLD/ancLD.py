@@ -363,7 +363,6 @@ if not args.F:
 
 			# new, faster function to write the csv file
 			# does not support compression
-			#read_write.df2csv(df = batch_EM_df, fname = OUTPATH, formats = formats, mode = mode)
 			read_write.df2csv(df = batch_EM_df, fname = OUTPATH, formats = formats, mode = mode)
 			FIRST = False
 			del batch_EM_df, pop_df, pop_dfs, bp_dist, genetic_dist, r2, D, Dprime, pA, pB # cleanup - does this help?
