@@ -5,12 +5,12 @@ setup(
     version='0.1',
 	python_requires='>=2.7',
     packages=find_packages(exclude=['tests*']),
-    license='MIT',
+    license='GPL 3.0',
     description='Estimate the haplotype frequencies and LD in the ancestral populations of admixed samples.',
     long_description=open('README.md').read(),
-    install_requires=[ 'pandas', 'numpy', 'plinkio', ],
+    install_requires=[ 'pandas', 'numpy', 'pandas-plink', ],
 	extras_require={'numba_jit_compilation': ['numba']},
-    url='https://github.com/rwaples/ancLD',
+    url='https://github.com/rwaples/LDadmix',
     author='Ryan Waples',
     author_email='ryan.waples@gmail.com'
 )
