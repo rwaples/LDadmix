@@ -14,7 +14,7 @@ works with Python 3.6+
 ### python packages
  - numpy
  - pandas
- - plinkio (https://github.com/mfranberg/libplinkio) [install with: "pip install plinkio"]
+ - pandas-plink
 ### optional python packages
  - numba (highly recommended, will speed up the analysis ~100 fold)
 
@@ -33,6 +33,7 @@ Output files can get large.
  - pop : population (based on position in Q file) (one-indexed)
  - iter : number of EM iterations
  - logLike : (log)likelihood of the data at the termination of the EM
+ - flag : nonzero if either locus has minor allele frequency < 0.05
  - Hap00 : frequency of the 0_0 haplotype
  - Hap01 : frequency of the 0_1 haplotype
  - Hap10 : frequency of the 1_0 haplotype
