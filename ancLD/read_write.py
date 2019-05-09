@@ -38,9 +38,15 @@ def df2csv(df, fname, formats, mode):
 	sep = '\t'
 	Nd = len(df.columns)
 	Nd_1 = Nd - 1
-	with open(fname, mode) as OUTFILE:
+	if fname.endswith('.gz'):
+		import gzip
+		opencmd = gzip.open
+		mode = mode+'t' # need to specify text mode
+	else:
+		opencmd = open
+	with opencmd(fname, mode) as OUTFILE:
 		# only write heading if clobbering file
-		if mode == 'w':
+		if mode.startswith('w'):
 			OUTFILE.write(sep.join(df.columns) + '\n')
 		for row in df.itertuples(index=False):
 			# is this really the best way to build up strings?

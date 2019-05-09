@@ -56,12 +56,12 @@ import multiprocess_control
 parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 # Input
 parser.add_argument('-Q', type=str, default = None,
-	help='path to [Q] file')
+	help='path to Q file (admixture proportions)')
 parser.add_argument('-G', type=str, default = './data/example_1',
 	help='path to plink fileset - looks for *.bed/bim/fam')
 
 # Analysis
-parser.add_argument('-L', type=int, default=100000,
+parser.add_argument('-L', type=int, default=1000000,
 	help='maximum number of locus pairs to analyze - set to zero for no limit')
 parser.add_argument('-D', type=float, default=np.float(0),
 	help='only analyze pairs of sites within [D] distance, set to zero for no limit')
@@ -83,7 +83,7 @@ parser.add_argument('-T', type=float, default=1e-5,
 	help='EM stop criteria')
 
 # need to implement these flags
-parser.add_argument('-like', action='store_true',
+parser.add_argument('--like', action='store_true',
 	help = 'set this flag to use delta loglikelihood as the EM stop criteria')
 parser.add_argument('-X', action='store_true',
 	help = 'set this flag to disable the accelerated EM')
@@ -92,7 +92,7 @@ parser.add_argument('-X', action='store_true',
 parser.add_argument('-J', action='store_true',
 	help='set this flag to disable numba JIT compilation')
 
-parser.add_argument('-profile', action='store_true',
+parser.add_argument('--profile', action='store_true',
 	help='set this flag to profile the code (for debugging)')
 
 # Output
@@ -325,12 +325,16 @@ if not args.F:
 				pop_df = pd.concat([
 					pd.DataFrame(batch_EM_res[:, 0:5]), # metadata
 					pd.DataFrame(batch_EM_res[:, 5+popix]), # flag
-					pd.DataFrame(batch_EM_res[:, 5+NPOPS+4*popix: 9+NPOPS+popix*4]) # haplotype freqs
+					# haplotype freqs
+					pd.DataFrame(batch_EM_res[:, 5+NPOPS+4*popix: 9+NPOPS+popix*4])
 					], axis = 1)
 
-				pop_df.columns = ['i1', 'i2', 'non_missing', 'logLike', 'iter', 'flag', 'Hap00', 'Hap01', 'Hap10', 'Hap11']
-				pop_df[['i1', 'i2', 'non_missing', 'iter', 'flag']] = pop_df[['i1', 'i2', 'non_missing', 'iter', 'flag']].astype(np.int)
-				r2, D, Dprime, pA, pB = utils.get_sumstats_from_haplotype_freqs(batch_EM_res[:, 5+NPOPS+4*popix: 9+NPOPS+popix*4]) # LD for each pop
+				pop_df.columns = ['i1', 'i2', 'non_missing', 'logLike', 'iter', 'flag',
+					'Hap00', 'Hap01', 'Hap10', 'Hap11']
+				pop_df[['i1', 'i2', 'non_missing', 'iter',
+					'flag']] = pop_df[['i1', 'i2', 'non_missing', 'iter', 'flag']].astype(np.int)
+				r2, D, Dprime, pA, pB = utils.get_sumstats_from_haplotype_freqs(
+					batch_EM_res[:, 5+NPOPS+4*popix: 9+NPOPS+popix*4]) # LD for each pop
 				pop_df['CHR'] = CHR
 				pop_df['locus1'] = locus1_name
 				pop_df['locus2'] = locus2_name
@@ -346,11 +350,13 @@ if not args.F:
 				pop_dfs.append(pop_df)
 
 			batch_EM_df = pd.concat(pop_dfs)
-			batch_EM_df = batch_EM_df[['i1', 'i2', 'locus1', 'locus2',  'CHR', 'bp_dist', 'genetic_dist', 'non_missing', 'pop', 'iter',
-				'logLike', 'flag', 'Hap00', 'Hap01', 'Hap10', 'Hap11', 'r2', 'D', 'Dprime', 'p1', 'p2']].sort_values(['i1', 'i2', 'pop'])
-			formats = ['%d', '%d', '%s', '%s', '%s', '%d', '%g', '%d', '%d', '%d',
-				'%.9f', '%d', '%.4f', '%.4f', '%.4f', '%.4f', '%.4f', '%.4f', '%.4f', '%.4f', '%.4f']
-
+			batch_EM_df = batch_EM_df[['i1', 'i2', 'locus1', 'locus2',  'CHR', 'bp_dist',
+				'genetic_dist', 'non_missing', 'pop', 'iter', 'logLike', 'flag',
+				'Hap00', 'Hap01', 'Hap10', 'Hap11', 'r2', 'D', 'Dprime',
+				'p1', 'p2']].sort_values(['i1', 'i2', 'pop'])
+			formats = ['%d', '%d', '%s', '%s', '%s', '%d', '%g',
+				'%d', '%d', '%d', '%.9f', '%d', '%.4f', '%.4f',
+				'%.4f', '%.4f', '%.4f', '%.4f', '%.4f', '%.4f', '%.4f']
 
 			if GZIP: # compress the output/
 				compression = 'gzip'
@@ -365,7 +371,8 @@ if not args.F:
 			# does not support compression
 			read_write.df2csv(df = batch_EM_df, fname = OUTPATH, formats = formats, mode = mode)
 			FIRST = False
-			del batch_EM_df, pop_df, pop_dfs, bp_dist, genetic_dist, r2, D, Dprime, pA, pB # cleanup - does this help?
+			# cleanup - does this help?
+			del batch_EM_df, pop_df, pop_dfs, bp_dist, genetic_dist, r2, D, Dprime, pA, pB
 
 		if STOP:
 			break
@@ -389,7 +396,8 @@ if args.F:
 	# I could enfore the locus limit here
 
 	batches = np.split(range(data_nloci), np.arange(BATCH_SIZE, data_nloci, BATCH_SIZE))
-	print("There will be {} output batch(es) with up to {:,} loci each".format(len(batches), BATCH_SIZE))
+	print("There will be {} output batch(es) with up to {:,} loci each".format(
+		len(batches), BATCH_SIZE))
 	for count, batch in enumerate(batches, start = 1): # now start batch numbers at 1
 		print("\tStarting batch {}".format(count))
 
@@ -408,18 +416,16 @@ if args.F:
 		formats = ['%9i',  '%9i','%9i','%9i', '%1.8f'] + ['%1.3f', '%1.3f', '%1.3f']*NPOPS
 		batch_EM_df = pd.DataFrame(batch_EM_res)
 		popnums  = [pop+1 for pop in range(NPOPS) ]
-		popheaders = [['pop{}_maf'.format(pop), 'pop{}_ci_lower'.format(pop), 'pop{}_ci_upper'.format(pop)] for pop in popnums]
-		batch_EM_df.columns = ['locus', 'non_missing', 'allele_count', 'niter', 'LL'] + sum(popheaders, [])
+		popheaders = [['pop{}_maf'.format(pop),
+			'pop{}_ci_lower'.format(pop), 'pop{}_ci_upper'.format(pop)] for pop in popnums]
+		batch_EM_df.columns = ['locus', 'non_missing',
+			'allele_count', 'niter', 'LL'] + sum(popheaders, [])
 		if FIRST:
 			mode = 'w'
 		else:
 			mode ='a'
 		LDadmix.df2csv(df=batch_EM_df, fname=OUTPATH, formats = formats, mode=mode)
 		FIRST = False
-
-#		np.savetxt(OUTPATH, batch_EM_res, delimiter = '\t',
-#			fmt = ['%9i', '%9i','%9i', '%1.8f', '%1.6f', '%1.6f', '%1.6f', '%1.6f', '%1.6f', '%1.6f'])
-
 
 
 print("\nAll Done!")

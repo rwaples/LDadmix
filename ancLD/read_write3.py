@@ -3,8 +3,14 @@ def df2csv(df, fname, formats, mode):
 	"""now with string-literals
 	doesn't work with python2"""
 	sep = '\t'
-	with open(fname, mode) as OUTFILE:
-		if mode == 'w':
+	if fname.endswith('.gz'):
+		import gzip
+		opencmd = gzip.open
+		mode = mode+'t' # need to specify text mode
+	else:
+		opencmd = open
+	with opencmd(fname, mode) as OUTFILE:
+		if mode.startswith('w'):
 			OUTFILE.write(sep.join(df.columns) + '\n')
 		for row in df.itertuples(index=False):
 			fstring = f"{row[0]:d}\t{row[1]:d}\t{row[2]:s}\t{row[3]:s}\t{row[4]:d}\t\
