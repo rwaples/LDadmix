@@ -1,4 +1,5 @@
 numpy
 pandas
-numba
+scipy
 pandas-plink
+numba
