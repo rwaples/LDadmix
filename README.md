@@ -15,9 +15,14 @@ cd LDadmix
 python3 setup.py install
 ```
 
+### run LDadmix on the included example data set
+```
+# from LDadmix directory
+python3 ./ancLD/ancLD.py -G ./example/example_1 -O ./example/example_1.out.gz
+```
+
 ### usage
 ```
-cd ancLD
 python3 ancLD.py --help
 ```
 
