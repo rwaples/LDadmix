@@ -31,15 +31,21 @@ import ancLD_singlelocus
 # make a post_processing script
 # this would produce an LD-decay output and maybe also a plot with a line per population
 # fix single locus analysis
+# enforce Numba requirement
 
 
 # argparse
 parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+
+# Required
+parser.add_argument('-G', type=str,
+	# default=str(pathlib.Path(__file__).parent / "data/example_1"),
+	required=True,
+	help='path to plink fileset - looks for *.bed/bim/fam')
+
 # Input
 parser.add_argument('-Q', type=str, default=None,
 	help='path to Q file (admixture proportions)')
-parser.add_argument('-G', type=str, default=str(pathlib.Path(__file__).parent / "data/example_1"),
-	help='path to plink fileset - looks for *.bed/bim/fam')
 
 # Analysis
 parser.add_argument('-L', type=int, default=1000000,
@@ -72,7 +78,8 @@ parser.add_argument('-J', action='store_true',
 	help='set this flag to disable numba JIT compilation')
 
 # Output
-parser.add_argument('-O', type=str, default=str(pathlib.Path(__file__).parent.parent / "scratch/example_1.out.gz"),
+parser.add_argument('-O', type=str,
+	default=str(pathlib.Path(__file__).parent.parent / "scratch/default_output.LDadmix.out.gz"),
 	help='path to output file, will gzip compress if it ends with ".gz"')
 # parser.add_argument('-R', type=int, default=3, help='Output precision')
 parser.add_argument('-B', type=int, default=1000000,

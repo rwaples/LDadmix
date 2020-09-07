@@ -12,3 +12,5 @@
 *.py~
 *.log
 *.dat
+*.gz
+*.out
