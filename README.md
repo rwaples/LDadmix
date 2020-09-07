@@ -1,26 +1,29 @@
 # LDadmix
 Estimate the haplotype frequencies and LD in the ancestral populations of admixed samples.
 
-### usage
-```
-git clone https://github.com/rwaples/LDadmix.git
-cd LDadmix
-python setup.py install
-cd ancLD
-python ancLD.py --help
-```
 
 ## installation
 ```
-# create an env for LDadmix
-conda create -n LDtest python=3.6 numpy scipy pandas pandas-plink numba 
-
-# 
+# if needed, create a conda environment for LDadmix
+conda create -n LDtest python=3.6 numpy scipy pandas pandas-plink numba
 conda activate LDtest
 
-# git pull
-cd ~/LDadmix/test
-python3 ../project/ancLD/ancLD.py
+# pull code from github
+git clone https://github.com/rwaples/LDadmix.git
+# enter directory and install
+cd LDadmix
+python3 setup.py install
+```
+
+### run LDadmix on the included example data set
+```
+# from LDadmix directory
+python3 ./ancLD/ancLD.py -G ./example/example_1 -O ./example/example_1.out.gz
+```
+
+### usage
+```
+python3 ancLD.py --help
 ```
 
 ## requirements
@@ -36,8 +39,8 @@ tested on Python 3.6
 
 ### output format
 Tab-delimited text file, one line per pair of loci per population.
-Output will be gzipped (\*.gz) with the -Z flag.  
-Output files can get large.
+Output will be gzipped (\*.gz) if the path ends in ".gz".
+Output files can get large, compression is recommended.
 
  - i1, i2 : index of locus[1/2] within chromosome (zero-indexed)
  - locus1, locus2 : name of locus[1/2], taken from the .bim file
