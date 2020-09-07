@@ -10,6 +10,19 @@ cd ancLD
 python ancLD.py --help
 ```
 
+## installation
+```
+# create an env for LDadmix
+conda create -n LDtest python=3.6 numpy scipy pandas pandas-plink numba 
+
+# 
+conda activate LDtest
+
+# git pull
+cd ~/LDadmix/test
+python3 ../project/ancLD/ancLD.py
+```
+
 ## requirements
 tested on Python 3.6
 
