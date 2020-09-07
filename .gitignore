@@ -4,6 +4,7 @@
 /ancLD/__pycache__/*
 /ancLD/tests.py
 /tests/*
+/ancLD/sim/*
 
 *.lprof
 *.ipynb
