@@ -44,12 +44,11 @@ parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFo
 # Input
 parser.add_argument('-Q', type=str, default = None,
 	help='path to Q file (admixture proportions)')
-
 parser.add_argument('-G', type=str, default = str(pathlib.Path(__file__).parent / "data/example_1"),
 	help='path to plink fileset - looks for *.bed/bim/fam')
 
 # Analysis
-parser.add_argument('-L', type=int, default=1000,
+parser.add_argument('-L', type=int, default=1000000,
 	help='maximum number of locus pairs to analyze - set to zero for no limit')
 parser.add_argument('-D', type=float, default=np.float(0),
 	help='only analyze pairs of sites within [D] distance, set to zero for no limit')
@@ -76,21 +75,20 @@ parser.add_argument('--like', action='store_true',
 parser.add_argument('-X', action='store_true',
 	help = 'set this flag to disable the accelerated EM')
 
-
 parser.add_argument('-J', action='store_true',
 	help='set this flag to disable numba JIT compilation')
 
-parser.add_argument('--profile', action='store_true',
-	help='set this flag to profile the code (for debugging)')
+#parser.add_argument('--profile', action='store_true',
+#	help='set this flag to profile the code (for debugging)')
 
 # Output
-parser.add_argument('-O', type=str, default = str(pathlib.Path(__file__).parent.parent / "scratch/example_1.out"),
-	help='path to output file')
+parser.add_argument('-O', type=str, default = str(pathlib.Path(__file__).parent.parent / "scratch/example_1.out.gz"),
+	help='path to output file, will gzip compress if it ends with ".gz"')
 #parser.add_argument('-R', type=int, default=3, help='Output precision')
 parser.add_argument('-B', type=int, default=1000000,
 	help='Batch size, the number of pairs to analyze between each write to disk.')
-parser.add_argument('-Z', action='store_true',
-	help='set flag to gzip output file')
+#parser.add_argument('-Z', action='store_true',
+#	help='set flag to gzip output file')
 parser.add_argument('-F', action='store_true',
 	help='set this flag to estimate allele freqeuncies within each amixture component')
 
@@ -110,7 +108,6 @@ print("\n------------------\nParameters: ")
 print("Admixture (Q) file: {}".format(args.Q))
 print("Plink fileset: {}".format(args.G))
 print("Output file: {}".format(args.O))
-print("gzip output? : {}".format(args.Z))
 
 print("Max allowed number of locus pairs: {}  (0 = no limit)".format(args.L))
 print("Max allowed distance between locus pairs: {}  (0 = no limit)".format(args.D))
@@ -152,12 +149,7 @@ if args.like:
 	EM_STOP_HAPS = False
 BATCH_SIZE = args.B
 THREADS = args.P
-GZIP = args.Z
-
-if GZIP:
-	OUTPATH = args.O + ".gz"
-else:
-	OUTPATH = args.O
+OUTPATH = args.O
 
 print("\n------------------\nLoading data:")
 samples_df, loci_df, geno_array, HAS_MISSING = read_write.read_plink_pandas(args.G)
@@ -347,10 +339,6 @@ if not args.F:
 				'%d', '%d', '%d', '%.9f', '%d', '%.4f', '%.4f',
 				'%.4f', '%.4f', '%.4f', '%.4f', '%.4f', '%.4f', '%.4f']
 
-			if GZIP: # compress the output/
-				compression = 'gzip'
-			else:
-				compression = None
 			if FIRST: # clobber and write the header
 				mode = 'w'
 			else: # append and no header

@@ -11,30 +11,6 @@ def read_plink_pandas(basepath):
     return(fam, bim, Gp, (Gp>8).any())
 
 
-def df2csv_old(df, fname, formats, mode):
-	"""adapted from https://stackoverflow.com/q/15417574"""
-	sep = '\t'
-	Nd = len(df.columns)
-	Nd_1 = Nd - 1
-	if fname.endswith('.gz'):
-		import gzip
-		opencmd = gzip.open
-		mode = mode+'t' # need to specify text mode
-	else:
-		opencmd = open
-	with opencmd(fname, mode) as OUTFILE:
-		# only write heading if clobbering file
-		if mode.startswith('w'):
-			OUTFILE.write(sep.join(df.columns) + '\n')
-		for row in df.itertuples(index=False):
-			# is this really the best way to build up strings?
-			ss = ''
-			for ii in range(Nd):
-				ss += formats[ii] % row[ii]
-				if ii < Nd_1:
-					ss += sep
-			OUTFILE.write(ss+'\n')
-
 def df2csv(df, fname, formats, mode):
 	"""now with string-literals
 	doesn't work with python2"""
