@@ -3,8 +3,6 @@ import numpy as np
 from utils import map2domain, get_LL_numba
 
 
-
-
 @jit(nopython=True, nogil=False, cache=True)
 def do_multiEM(inputs):
 	""""""

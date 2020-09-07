@@ -4,7 +4,6 @@ import itertools
 import ctypes
 from numba import jit
 
-
 import EM
 import utils
 

@@ -1,7 +1,7 @@
-from __future__ import absolute_import, division, print_function
-from builtins import (ascii, bytes, chr, dict, filter, hex, input,
-                      int, map, next, oct, open, pow, range, round,
-                      str, super, zip)# http://python-future.org/imports.html
+#from __future__ import absolute_import, division, print_function
+#from builtins import (ascii, bytes, chr, dict, filter, hex, input,
+#                      int, map, next, oct, open, pow, range, round,
+#                      str, super, zip)# http://python-future.org/imports.html
 
 import itertools
 import ctypes
@@ -15,10 +15,19 @@ try:
 	print("Numba import successful")
 	print("------------------\n")
 except ImportError:
-	_numba_available = False
-	print("------------------")
-	print("Import of numba failed, analysis will run significantly slower")
-	print("------------------\n")
+    _numba_available = False
+    print("------------------")
+    print("Import of numba failed, analysis will run significantly slower")
+    print("------------------\n")
+    # https://github.com/numba/numba/issues/3735#issuecomment-461075470
+    def jit(pyfunc=None, **kwargs):
+        def wrap(func):
+            return func
+        if pyfunc is not None:
+            return wrap(pyfunc)
+        else:
+            return wrap
+
 
 # decorator depending on numba, if numba is found, will decorate with: jit(...)
 def optional_numba_decorator(func):
@@ -30,7 +39,6 @@ def optional_numba_decorator(func):
 		return(func)
 
 # pos can be a vector of float or int posistions, as can the maxdist
-# dont set to cache
 @jit(nopython=True, nogil=False, cache=False)
 def find_idxpairs_maxdist_generator(pos, maxdist):
 	"""iterator, yields indexes for all pairs of loci within maxdist,

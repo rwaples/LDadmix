@@ -1,12 +1,12 @@
-from __future__ import absolute_import, division, print_function
+#from __future__ import absolute_import, division, print_function
 # http://python-future.org/imports.html
-from builtins import (ascii, bytes, chr, dict, filter, hex, input,
-                      int, map, next, oct, open, pow, range, round,
-                      str, super, zip)
+#from builtins import (ascii, bytes, chr, dict, filter, hex, input,
+#                      int, map, next, oct, open, pow, range, round,
+#                      str, super, zip)
 
-#base
 import argparse
 import multiprocessing
+import pathlib
 import itertools
 import collections
 import ctypes
@@ -32,24 +32,11 @@ import multiprocess_control
 
 
 ## TODO
-# ensure that EM is reaching a reasonable stopping point
-# find cases where the result depend on the starting conditions - maybe haplotype switching
-# incorporate simulated data
-# common output format for simulated data and analyzed data
 # firm up an example data set
 # default to gzipped output
-# compare the LD calculations external libraries that work on vcf
 # add acknowledgements and a link to the greenland paper - Garrett, Filipe
-# speedup
-## 	accelerated EM
-# option to ditch the likelihood calculations and use delta in haplotype freqs to stop EM
-# check global variables within numba functions
 # make a post_processing script
-#   this would produce an LD-decay output and maybe also a plot with a line per population
-# double check corrspondence between bim file and reported freqs
-# optional numba decorator for the single-locus frequency estimates
-
-
+# this would produce an LD-decay output and maybe also a plot with a line per population
 
 
 # argparse
@@ -57,11 +44,12 @@ parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFo
 # Input
 parser.add_argument('-Q', type=str, default = None,
 	help='path to Q file (admixture proportions)')
-parser.add_argument('-G', type=str, default = './data/example_1',
+
+parser.add_argument('-G', type=str, default = str(pathlib.Path(__file__).parent / "data/example_1"),
 	help='path to plink fileset - looks for *.bed/bim/fam')
 
 # Analysis
-parser.add_argument('-L', type=int, default=1000000,
+parser.add_argument('-L', type=int, default=1000,
 	help='maximum number of locus pairs to analyze - set to zero for no limit')
 parser.add_argument('-D', type=float, default=np.float(0),
 	help='only analyze pairs of sites within [D] distance, set to zero for no limit')
@@ -96,7 +84,7 @@ parser.add_argument('--profile', action='store_true',
 	help='set this flag to profile the code (for debugging)')
 
 # Output
-parser.add_argument('-O', type=str, default = '../scratch/example_1.out',
+parser.add_argument('-O', type=str, default = str(pathlib.Path(__file__).parent.parent / "scratch/example_1.out"),
 	help='path to output file')
 #parser.add_argument('-R', type=int, default=3, help='Output precision')
 parser.add_argument('-B', type=int, default=1000000,
@@ -109,13 +97,13 @@ parser.add_argument('-F', action='store_true',
 args = parser.parse_args()
 
 ## Profiling
-PROFILE = False
-if args.profile:
-	print("Profiling Enabled")
-	PROFILE = True
-	import ancLD_profile as ancLD_profile
-	p = ancLD_profile.profiler.Profile(signatures=False)
-	p.enable()
+#PROFILE = False
+#if args.profile:
+#	print("Profiling Enabled")
+#	PROFILE = True
+#	import ancLD_profile as ancLD_profile
+#	p = ancLD_profile.profiler.Profile(signatures=False)
+#	p.enable()
 
 
 print("\n------------------\nParameters: ")
@@ -240,6 +228,7 @@ shared_seeds_np = np.frombuffer(shared_seeds.get_obj(), dtype='int32')
 array_dim = q.shape
 shared_q_array = multiprocessing.Array(ctypes.c_double, q.flatten(), lock = None)
 shared_q_matrix = np.frombuffer(shared_q_array.get_obj(), dtype='f8').reshape(array_dim)
+
 
 # main LD analysis
 if not args.F:
