@@ -136,8 +136,7 @@ def get_LL_numba(Q, H, code):
 	LL += np.log(	ind_hap_freqs[np.where(code == 8)[0], 3] * ind_hap_freqs[np.where(code == 8)[0], 3]).sum()
 	return(LL)
 
-#def get_geno_codes(genos):
-#	### NO longer used
-#	"""maps each pair of non-missing genotypes into an integer from 0 to 8
-#	pairs with missing genotypes will map above 8"""
-#	return(genos[0] + 3*genos[1])
+def get_geno_codes(genos):
+	"""maps each pair of non-missing genotypes into an integer from 0 to 8
+	pairs with missing genotypes will map above 8"""
+	return(genos[0] + 3*genos[1])

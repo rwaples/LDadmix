@@ -12,7 +12,7 @@ import scipy.stats
 
 
 #import LDadmix_v8_funcs as LDadmix
-import ancLD_funcs as LDadmix
+import utils as LDadmix_utils
 
 import ancLD_simulate_funcs as ancLD_sim
 
@@ -97,15 +97,15 @@ class Admixed_sample(object):
 		# get the frequencies and counts from the resulting haplotypes
 		self.hap_freqs_sample = ancLD_sim.get_hap_freqs(self.hap_array)
 		self.hap_counts = ancLD_sim.get_hap_counts(self.hap_array)
-        
+
 # summarize the haplotypes from each K
 		self.hap_freqs_of_k =dict()
 		self.hap_counts_of_k =dict()
 		for k in [0,1]:
-			self.hap_freqs_of_k[k] = ancLD_sim.get_hap_freqs(self.hap_array[self.source_pops==k])
+			self.hap_freqs_of_k[k] = ancLD_sim.get_hap_freqs(self.hap_array[(self.source_pops==k) & (~self.rec_events.astype('bool'))])
 			self.hap_counts_of_k[k] = ancLD_sim.get_hap_counts(self.hap_array[self.source_pops==k])
 		#geno codes
-		self.geno_codes = LDadmix.get_geno_codes((self.hap_array[::2] + np.roll(self.hap_array,-1, axis = 0)[::2]).T)       
+		self.geno_codes = LDadmix_utils.get_geno_codes((self.hap_array[::2] + np.roll(self.hap_array,-1, axis = 0)[::2]).T)
 		# TODO summary stats of the admixed haplotypes
 		self.rec_count = self.rec_events.sum()
 		self.no_rec_count = self._2n - self.rec_events.sum()

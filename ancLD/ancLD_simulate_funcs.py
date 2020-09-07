@@ -10,7 +10,7 @@ import scipy.stats
 
 
 #import LDadmix_v8_funcs as LDadmix
-import ancLD_funcs as LDadmix
+#import ancLD_funcs as LDadmix
 
 # generate the Q array
 def generate_Q_beta(a, b, n):
