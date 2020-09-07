@@ -1,10 +1,16 @@
-# will need to deal with missing data - either before or after bootstrapping
+import ctypes
+import numpy as np
+from numba import jit
+import itertools
+import multiprocessing
+
+
 def multiprocess_onelocusEM_outer(batch_indexes, shared_genoMatrix, Q, cpus, EM_iter, EM_tol, seeds, bootstraps):
+	"""Outer wrapper for single locus EM."""
 	# TODO pass seeds along in a better way
 
-	# spread the pairs across cpus
 	batch_size = len(batch_indexes)
-	per_thread = int(np.ceil(batch_size/float(cpus)))
+	per_thread = int(np.ceil(batch_size / float(cpus)))
 	ix_starts = itertools.chain([i * per_thread for i in range(cpus)])
 
 	# split across processes
@@ -12,17 +18,17 @@ def multiprocess_onelocusEM_outer(batch_indexes, shared_genoMatrix, Q, cpus, EM_
 
 	# make a shared results array
 	npops = Q.shape[1]
-	res_dim2 = 5+3*npops # loc, count_non_missing, AC, logL, iters, [population_freqs]
-	res = np.zeros((batch_size, res_dim2), dtype = 'f8')
-	sharedArray = multiprocessing.Array(ctypes.c_double, res.flatten(), lock = None)
+	res_dim2 = 5 + (3 * npops)
+	res = np.zeros((batch_size, res_dim2), dtype='f8')
+	sharedArray = multiprocessing.Array(ctypes.c_double, res.flatten(), lock=None)
 	shared_resMatrix = np.frombuffer(sharedArray.get_obj(), dtype='f8').reshape(res.shape)
-	print ("size of res matrix:")
-	print (shared_resMatrix.shape)
+	print("size of res matrix:")
+	print(shared_resMatrix.shape)
 	del res
 
 	n = Q.shape[0]
-	genos_resample = np.zeros(n, dtype = 'i1')
-	Q_resample = np.zeros((n, Q.shape[1]), dtype = 'f8')
+	genos_resample = np.zeros(n, dtype='i1')
+	Q_resample = np.zeros((n, Q.shape[1]), dtype='f8')
 	# set up processes
 	processes = [multiprocessing.Process(target=multiprocess_onelocusEM_inner, args=(job, shared_genoMatrix, shared_resMatrix,
 			Q, EM_iter, EM_tol, next(ix_starts), seeds, bootstraps, genos_resample, Q_resample)) for job in jobs]
@@ -38,6 +44,8 @@ def multiprocess_onelocusEM_outer(batch_indexes, shared_genoMatrix, Q, cpus, EM_
 @jit(nopython=True)
 def multiprocess_onelocusEM_inner(genos_inner, shared_genoMatrix, shared_resMatrix, Q, EM_iter,
 		EM_tol, start_idx, seeds, bootstraps, genos_resample, Q_resample):
+	"""Inner wrapper for single locus EM."""
+
 	npops = Q.shape[1]
 	w = start_idx #  used to index the results matrix
 	for i in range(len(genos_inner)):
