@@ -4,15 +4,13 @@ Estimate the haplotype frequencies and LD in the ancestral populations of admixe
 
 ## installation
 ```
-# if needed, create a conda environment for LDadmix
-conda create -n LDtest python=3.6 numpy scipy pandas pandas-plink numba
-conda activate LDtest
-
-# pull code from github
+# pull code from github and enter directory
 git clone https://github.com/rwaples/LDadmix.git
-# enter directory and install
 cd LDadmix
-python3 setup.py install
+
+# if needed, create a conda environment for LDadmix
+conda env create -f ./LDadmix.conda.yml
+conda activate LDadmix
 ```
 
 ### run LDadmix on the included example data set
